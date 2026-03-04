@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+ui/
+
+# Secrets
+.env
+secrets.env
+*.secrets
+
+# macOS
+.DS_Store
+
+# Logs
+*.log

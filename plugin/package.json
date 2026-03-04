@@ -1,0 +1,8 @@
+{
+  "name": "voice-interface",
+  "version": "1.0.0",
+  "description": "Urðarbrunnr Voice Interface plugin for OpenClaw",
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  }
+}

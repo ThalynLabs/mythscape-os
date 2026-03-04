@@ -1,0 +1,53 @@
+{
+  "id": "voice-interface",
+  "name": "Urðarbrunnr Voice Interface",
+  "version": "1.0.0",
+  "description": "Manages the Urðarbrunnr voice daemon lifecycle — wake-word detection, ElevenLabs middleware, Web UI.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": { "type": "boolean" },
+      "daemon": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "user": { "type": "string" },
+          "python": { "type": "string" },
+          "port": { "type": "number" },
+          "log": { "type": "string" }
+        }
+      },
+      "middleware": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "port": { "type": "number" },
+          "log": { "type": "string" }
+        }
+      },
+      "lifecycle": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "restart_max": { "type": "number" },
+          "restart_window_seconds": { "type": "number" },
+          "health_check_timeout_seconds": { "type": "number" },
+          "shutdown_grace_seconds": { "type": "number" }
+        }
+      }
+    }
+  },
+  "uiHints": {
+    "daemon.path": { "label": "Daemon script path", "placeholder": "/opt/openclaw-voice/daemon.py" },
+    "daemon.user": { "label": "Restricted OS user", "placeholder": "_openclaw-voice" },
+    "daemon.python": { "label": "Python binary (venv)", "placeholder": "/opt/openclaw-voice/.venv/bin/python" },
+    "daemon.port": { "label": "Web UI / health port", "placeholder": "9800" },
+    "middleware.port": { "label": "ElevenLabs middleware port", "placeholder": "9801" },
+    "lifecycle.restart_max": { "label": "Max crash restarts", "placeholder": "3" },
+    "lifecycle.restart_window_seconds": { "label": "Restart window (seconds)", "placeholder": "300" },
+    "lifecycle.health_check_timeout_seconds": { "label": "Health check timeout (seconds)", "placeholder": "10" },
+    "lifecycle.shutdown_grace_seconds": { "label": "Graceful shutdown wait (seconds)", "placeholder": "5" }
+  }
+}
