@@ -12,6 +12,12 @@
 
 import { Fragment, useState, useEffect, useCallback } from "react";
 
+// ── Constants ────────────────────────────────────────────────────────────────
+
+// Valerie's user UUID — used for Brain API queries that require a user_id.
+// This is the stable identity UUID from the Brain's user table, not a display name.
+const VALERIE_UUID = "f94d5e6d-d7a7-4e6f-a15d-37d30a9592fc";
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtDate(ts) {
@@ -148,7 +154,7 @@ function Urd() {
       const data = await brainFetch("/search", {
         method: "POST",
         body: {
-          who: { user_id: "valerie", agent_id: "sethren" },
+          who: { user_id: VALERIE_UUID, agent_id: "sethren" },
           query: searchQuery,
           limit: 30,
           include: "both",
@@ -167,7 +173,7 @@ function Urd() {
     setInspectLoading(true);
     try {
       const data = await brainFetch("/admin/inspect", {
-        params: { agent_id: agentId, user_id: "valerie" },
+        params: { agent_id: agentId, user_id: VALERIE_UUID },
       });
       setInspectData(data);
     } catch (e) {
@@ -635,8 +641,8 @@ function Verdandi({ health, agents }) {
     setError(null);
     const results = await Promise.allSettled([
       brainFetch("/health"),
-      brainFetch("/thread/sethren", { params: { user_id: "valerie" } }),
-      brainFetch("/brain-state/sethren", { params: { user_id: "valerie" } }),
+      brainFetch("/thread/sethren", { params: { user_id: VALERIE_UUID } }),
+      brainFetch("/brain-state/sethren", { params: { user_id: VALERIE_UUID } }),
       brainFetch("/blackboard/sethren"),
       brainFetch("/emotion/sethren"),
     ]);
