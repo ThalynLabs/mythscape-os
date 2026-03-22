@@ -714,6 +714,290 @@ body {
 .muted { color: var(--text-muted); }
 .ok    { color: var(--well-moss); }
 
+/* ── Norns Brain Admin styles ── */
+
+/* Input field for Norns search/forms */
+.norns-input {
+  background: var(--well-stone);
+  border: 1px solid var(--well-rim);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  font-family: var(--font-ui);
+  outline: none;
+  transition: border-color var(--ease);
+}
+.norns-input:focus { border-color: var(--well-water); }
+.norns-input::placeholder { color: var(--text-muted); }
+
+/* Result lists (memories, anchors, candidates) */
+.norns-result-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.norns-result-item {
+  background: var(--well-stone);
+  border: 1px solid var(--well-rim);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  cursor: pointer;
+  transition: border-color var(--ease), background var(--ease);
+}
+.norns-result-item:hover {
+  border-color: var(--well-mist);
+  background: var(--well-deep);
+}
+
+.norns-result-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.norns-result-text {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.norns-result-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  display: block;
+  margin-top: 0.2rem;
+}
+
+/* Badges (type, category, decay) */
+.norns-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--well-rim);
+  color: var(--text-secondary);
+  background: var(--well-deep);
+}
+.norns-badge-memory { color: var(--well-water); border-color: var(--well-water); }
+.norns-badge-anchor { color: var(--well-rune); border-color: var(--well-rune); }
+.norns-badge-cat { color: var(--well-ember); border-color: var(--well-ember); }
+.norns-badge-decay { color: var(--text-muted); }
+
+/* Relevance/confidence score */
+.norns-score {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* Detail card for expanded view */
+.norns-detail-card {
+  background: var(--well-stone);
+  border: 1px solid var(--well-water);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+}
+
+/* Content block (monospace, scrollable) */
+.norns-content-block {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  background: var(--well-void);
+  border: 1px solid var(--well-rim);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 0.5rem 0 0;
+}
+
+/* Sub-detail disclosures within a Norn pane */
+.norns-sub-detail {
+  border: 1px solid var(--well-rim);
+  border-radius: var(--radius-sm);
+  margin-top: 0.5rem;
+  padding: 0;
+}
+.norns-sub-detail > summary {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.norns-sub-detail > summary:hover { color: var(--well-water); }
+.norns-sub-detail[open] > summary { border-bottom: 1px solid var(--well-rim); }
+.norns-sub-detail > :not(summary) { padding: 0.5rem 0.75rem; }
+
+/* Brain state indicator */
+.norns-brain-state {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.norns-brain-state-awake { color: var(--well-moss); }
+.norns-brain-state-drowsy { color: var(--well-ember); }
+.norns-brain-state-dreaming { color: var(--well-rune); }
+
+/* Emotion bars */
+.norns-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+.norns-bar-wrap span {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: 2.5rem;
+}
+.norns-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--well-water);
+  transition: width 0.3s ease;
+  min-width: 2px;
+}
+.norns-bar-valence { background: var(--well-moss); }
+.norns-bar-openness { background: var(--well-rune); }
+.norns-bar-warmth { background: var(--well-ember); }
+
+/* Tags */
+.norns-tags {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  margin-top: 0.3rem;
+}
+.norns-tag {
+  font-size: 0.65rem;
+  padding: 0.05rem 0.35rem;
+  background: var(--well-deep);
+  border: 1px solid var(--well-rim);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+/* Candidate review actions */
+.norns-candidate-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+.norns-btn-approve { color: var(--well-moss); border-color: var(--well-moss); }
+.norns-btn-approve:hover { background: rgba(74, 222, 128, 0.1); }
+.norns-btn-reject { color: var(--well-blood); border-color: var(--well-blood); }
+.norns-btn-reject:hover { background: rgba(248, 113, 113, 0.1); }
+
+/* Pending count badge next to Skuld */
+.norns-pending-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  background: var(--well-ember);
+  color: var(--well-void);
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-style: normal;
+  margin-left: 0.4rem;
+}
+
+/* Replace note in candidates */
+.norns-replace-note { color: var(--well-ember); }
+
+/* Blackboard items */
+.norns-bb-item { cursor: default; }
+
+/* Reasoning chains */
+.norns-reasoning-section { margin-top: 1rem; border-top: 1px solid var(--well-rim); padding-top: 0.75rem; }
+
+.norns-chain-filters {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.norns-chain-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  background: rgba(0,0,0,0.15);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--well-rim);
+}
+.norns-chain-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.norns-chain-form-field textarea { resize: vertical; }
+
+.norns-chain-card { cursor: default; }
+
+.norns-chain-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0.4rem 0;
+}
+.norns-chain-step {
+  padding: 0.35rem 0.5rem;
+  border-left: 2px solid var(--well-rim);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.norns-chain-step p { margin: 0; color: var(--text-primary); }
+.norns-chain-step-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.norns-chain-step-assumption { border-color: var(--well-water); }
+.norns-chain-step-assumption .norns-chain-step-label { color: var(--well-water); }
+.norns-chain-step-failure { border-color: var(--well-blood, #f87171); }
+.norns-chain-step-failure .norns-chain-step-label { color: var(--well-blood, #f87171); }
+.norns-chain-step-revision { border-color: var(--well-ember); }
+.norns-chain-step-revision .norns-chain-step-label { color: var(--well-ember); }
+.norns-chain-step-outcome { border-color: var(--well-moss); }
+.norns-chain-step-outcome .norns-chain-step-label { color: var(--well-moss); }
+
+.norns-chain-arrow {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0.1rem 0;
+}
+
 /* ── The Hearth section ── */
 /* Security and audit UI. Uses <details> for collapsible audit results,
    <table> for genuinely tabular audit data, and <output> for live security status. */

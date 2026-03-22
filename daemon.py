@@ -27,7 +27,7 @@ from typing import Any, AsyncGenerator, Optional
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1227,6 +1227,308 @@ async def get_agents():
         agent["displayName"] = agent_settings.get("displayName", agent["displayName"])
         agent["agentId"]     = agent_settings.get("agentId",     agent.get("agentId", "main"))
     return {"ok": True, "agents": agents}
+
+
+# ---------------------------------------------------------------------------
+# Brain proxy routes — The Brain episodic memory & conversation archive
+# ---------------------------------------------------------------------------
+# The Brain runs on port 3008 as a separate Node.js service.
+# The daemon proxies specific route families so the UI can reach Brain
+# endpoints without CORS or direct port access.
+
+BRAIN_URL = "http://127.0.0.1:3008"
+BRAIN_SETHREN_KEY = "71e6c347db81bed6a02b56735b8e02722bb09added0ce197bed5d6f66fad3d54"
+
+
+async def _brain_get(path: str, params=None, timeout=10.0):
+    """Helper: GET request to Brain with auth."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        return await client.get(
+            f"{BRAIN_URL}{path}",
+            params=params,
+            headers={"Authorization": f"Bearer {BRAIN_SETHREN_KEY}"},
+        )
+
+
+async def _brain_post(path: str, body=None, timeout=30.0):
+    """Helper: POST request to Brain with auth."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        return await client.post(
+            f"{BRAIN_URL}{path}",
+            json=body,
+            headers={"Authorization": f"Bearer {BRAIN_SETHREN_KEY}"},
+        )
+
+
+async def _brain_patch(path: str, body=None, timeout=30.0):
+    """Helper: PATCH request to Brain with auth."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        return await client.patch(
+            f"{BRAIN_URL}{path}",
+            json=body,
+            headers={"Authorization": f"Bearer {BRAIN_SETHREN_KEY}"},
+        )
+
+
+async def _brain_put(path: str, body=None, timeout=30.0):
+    """Helper: PUT request to Brain with auth."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        return await client.put(
+            f"{BRAIN_URL}{path}",
+            json=body,
+            headers={"Authorization": f"Bearer {BRAIN_SETHREN_KEY}"},
+        )
+
+
+async def _brain_delete(path: str, timeout=10.0):
+    """Helper: DELETE request to Brain with auth."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        return await client.delete(
+            f"{BRAIN_URL}{path}",
+            headers={"Authorization": f"Bearer {BRAIN_SETHREN_KEY}"},
+        )
+
+
+# ---- Skein proxy (conversation archive) -----------------------------------
+
+@app.get("/api/skein")
+async def get_skein(request: Request):
+    """Proxy skein list from Brain. Forwards query params as-is."""
+    try:
+        r = await _brain_get("/api/skein", params=dict(request.query_params))
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Skein proxy error (list): %s", e)
+        raise HTTPException(status_code=500, detail=f"Brain unreachable: {e}")
+
+
+@app.get("/api/skein/search")
+async def search_skein(q: str = ""):
+    """Proxy skein search — converts GET ?q= to POST body for Brain."""
+    if not q.strip():
+        return {"entries": [], "total": 0}
+    try:
+        r = await _brain_post("/api/skein/search", body={"query": q})
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Skein proxy error (search): %s", e)
+        raise HTTPException(status_code=500, detail=f"Brain unreachable: {e}")
+
+
+@app.get("/api/skein/{entry_id}")
+async def get_skein_entry(entry_id: str):
+    """Proxy single skein entry from Brain."""
+    try:
+        r = await _brain_get(f"/api/skein/{entry_id}")
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Skein proxy error (entry %s): %s", entry_id, e)
+        raise HTTPException(status_code=500, detail=f"Brain unreachable: {e}")
+
+
+@app.post("/api/skein")
+async def create_skein_entry(request: Request):
+    """Proxy skein create to Brain."""
+    body = await request.json()
+    try:
+        r = await _brain_post("/api/skein", body=body)
+        return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+    except Exception as e:
+        log.error("Skein proxy error (create): %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.patch("/api/skein/{entry_id}")
+async def update_skein_entry(entry_id: str, request: Request):
+    """Proxy skein update to Brain."""
+    body = await request.json()
+    try:
+        r = await _brain_patch(f"/api/skein/{entry_id}", body=body)
+        return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+    except Exception as e:
+        log.error("Skein proxy error (update %s): %s", entry_id, e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+# ---- Brain admin proxy (Norns panel) --------------------------------------
+
+@app.get("/api/brain/health")
+async def brain_health():
+    """Brain health check."""
+    try:
+        r = await _brain_get("/health")
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain health proxy error: %s", e)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+
+
+@app.get("/api/brain/admin/debug")
+async def brain_admin_debug():
+    """Full Brain debug snapshot — memory stats, agent configs, key info."""
+    try:
+        r = await _brain_get("/v1/admin/debug")
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain admin debug proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.get("/api/brain/admin/inspect")
+async def brain_admin_inspect(request: Request):
+    """Inspect agent memories and anchors."""
+    try:
+        r = await _brain_get("/v1/admin/inspect", params=dict(request.query_params))
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain admin inspect proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.post("/api/brain/search")
+async def brain_search(request: Request):
+    """Semantic search across memories and anchors."""
+    body = await request.json()
+    try:
+        r = await _brain_post("/v1/search", body=body)
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain search proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.get("/api/brain/thread/{agent_id}")
+async def brain_thread_active(agent_id: str, request: Request):
+    """Get active thread for an agent."""
+    try:
+        r = await _brain_get(f"/v1/thread/active/{agent_id}", params=dict(request.query_params))
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain thread proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.get("/api/brain/brain-state/{agent_id}")
+async def brain_state_get(agent_id: str, request: Request):
+    """Get brain state (awake/drowsy/dreaming) for an agent."""
+    try:
+        r = await _brain_get(f"/v1/brain_state/{agent_id}", params=dict(request.query_params))
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain state proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.get("/api/brain/blackboard/{agent_id}")
+async def brain_blackboard(agent_id: str):
+    """Get blackboard entries for an agent."""
+    try:
+        r = await _brain_get(f"/v1/blackboard/{agent_id}")
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain blackboard proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.get("/api/brain/emotion/{agent_id}")
+async def brain_emotion(agent_id: str):
+    """Get emotion state for an agent."""
+    try:
+        r = await _brain_get(f"/v1/emotion/{agent_id}")
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain emotion proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.get("/api/brain/anchor-candidates")
+async def brain_anchor_candidates(request: Request):
+    """List pending anchor candidates — strips embedding vectors to avoid response size limits."""
+    try:
+        r = await _brain_get("/api/anchor-candidates", params=dict(request.query_params))
+        data = r.json()
+        # Strip raw embedding vectors — large float arrays not needed by the UI
+        if isinstance(data, dict) and "candidates" in data:
+            for c in data["candidates"]:
+                c.pop("embedding", None)
+        elif isinstance(data, list):
+            for c in data:
+                if isinstance(c, dict):
+                    c.pop("embedding", None)
+        return JSONResponse(content=data, status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain anchor candidates proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.patch("/api/brain/anchor-candidates/{candidate_id}")
+async def brain_anchor_candidate_review(candidate_id: str, request: Request):
+    """Approve or reject an anchor candidate."""
+    body = await request.json()
+    try:
+        r = await _brain_patch(f"/api/anchor-candidates/{candidate_id}", body=body)
+        return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+    except Exception as e:
+        log.error("Brain anchor candidate review proxy error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.delete("/api/brain/anchor/{anchor_id}")
+async def brain_delete_anchor(anchor_id: str):
+    """Delete an anchor (admin operation)."""
+    try:
+        # Anchors are stored in the memory table — use admin inspect to find, delete directly
+        # For now, return not-implemented since Brain doesn't have a direct anchor delete route
+        return JSONResponse({"error": "Anchor deletion not yet supported by Brain API"}, status_code=501)
+    except Exception as e:
+        log.error("Brain anchor delete proxy error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.get("/api/brain/reasoning-chains/search")
+async def brain_reasoning_chains_search(request: Request):
+    """Search reasoning chains."""
+    try:
+        r = await _brain_get("/api/reasoning-chains/search", params=dict(request.query_params))
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain reasoning chains search proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.post("/api/brain/reasoning-chains")
+async def brain_reasoning_chain_create(request: Request):
+    """Create a new reasoning chain."""
+    body = await request.json()
+    try:
+        r = await _brain_post("/api/reasoning-chains/consolidate", body=body)
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain reasoning chain create proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.patch("/api/brain/reasoning-chains/{chain_id}")
+async def brain_reasoning_chain_update(chain_id: str, request: Request):
+    """Update a reasoning chain (status, confidence)."""
+    body = await request.json()
+    try:
+        r = await _brain_patch(f"/api/reasoning-chains/{chain_id}", body=body)
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain reasoning chain update proxy error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.get("/api/brain/identity")
+async def brain_identity_list():
+    """List all known identities."""
+    try:
+        r = await _brain_get("/api/identity")
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain identity proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
 
 
 # ---- Static UI files -------------------------------------------------------
