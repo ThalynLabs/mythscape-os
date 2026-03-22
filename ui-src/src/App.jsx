@@ -16,6 +16,7 @@ import TheRoots       from "./components/TheRoots.jsx";
 import TheBranches    from "./components/TheBranches.jsx";
 import TheVoice       from "./components/TheVoice.jsx";
 import TheNodes       from "./components/TheNodes.jsx";
+import TheSkein       from "./components/TheSkein.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
 import { panelRegistry } from "./panelRegistry.js";
 
@@ -417,6 +418,8 @@ export default function App() {
         return <TheHearth health={health} />;
       case "runes":
         return <TheRunes health={health} />;
+      case "skein":
+        return <TheSkein />;
       case "threads":
         return <TheThreads />;
       case "roots":

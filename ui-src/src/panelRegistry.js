@@ -196,6 +196,18 @@ const CORE_PANELS = [
 
   // ── Process ─────────────────────────────────────────────────────────────────
   {
+    id: "skein",
+    label: "The Skein",
+    icon: "⊘",
+    category: "process",
+    order: -1,
+    defaultVisible: true,
+    defaultPinned: false,
+    source: "core",
+    tags: ["skein", "archive", "history", "messages", "search", "conversation"],
+    description: "The woven record — every message that has passed through the Well, archived and searchable.",
+  },
+  {
     id: "threads",
     label: "The Threads",
     icon: "≡",
