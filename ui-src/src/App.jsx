@@ -18,6 +18,7 @@ import TheVoice       from "./components/TheVoice.jsx";
 import TheNodes       from "./components/TheNodes.jsx";
 import TheSkein       from "./components/TheSkein.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
+import { BrainPhaseHeaderIndicator } from "./components/BrainPhaseControl.jsx";
 import { panelRegistry } from "./panelRegistry.js";
 
 // ── Health polling ────────────────────────────────────────────────────────────
@@ -474,6 +475,7 @@ export default function App() {
             Mythscape OS <span>· The Well</span>
           </span>
           <StatusIndicator health={health} />
+          <BrainPhaseHeaderIndicator />
           <button
             id="palette-trigger"
             onClick={() => setPaletteOpen(true)}

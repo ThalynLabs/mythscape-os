@@ -1238,6 +1238,17 @@ async def get_agents():
 
 BRAIN_URL = "http://127.0.0.1:3008"
 BRAIN_SETHREN_KEY = "71e6c347db81bed6a02b56735b8e02722bb09added0ce197bed5d6f66fad3d54"
+BRAIN_ADMIN_KEY = "be2113cdeac3c8753adfe0f8459eea91497563cc4bae7bbfedb0a241068dcc2e"  # Admin scope — for /v1/admin/* endpoints only
+
+
+async def _brain_admin_get(path: str, params=None, timeout=10.0):
+    """Helper: GET request to Brain with admin-scoped key."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        return await client.get(
+            f"{BRAIN_URL}{path}",
+            params=params,
+            headers={"Authorization": f"Bearer {BRAIN_ADMIN_KEY}"},
+        )
 
 
 async def _brain_get(path: str, params=None, timeout=10.0):
@@ -1367,7 +1378,7 @@ async def brain_health():
 async def brain_admin_debug():
     """Full Brain debug snapshot — memory stats, agent configs, key info."""
     try:
-        r = await _brain_get("/v1/admin/debug")
+        r = await _brain_admin_get("/v1/admin/debug")
         return JSONResponse(content=r.json(), status_code=r.status_code)
     except Exception as e:
         log.error("Brain admin debug proxy error: %s", e)
@@ -1378,7 +1389,7 @@ async def brain_admin_debug():
 async def brain_admin_inspect(request: Request):
     """Inspect agent memories and anchors."""
     try:
-        r = await _brain_get("/v1/admin/inspect", params=dict(request.query_params))
+        r = await _brain_admin_get("/v1/admin/inspect", params=dict(request.query_params))
         return JSONResponse(content=r.json(), status_code=r.status_code)
     except Exception as e:
         log.error("Brain admin inspect proxy error: %s", e)
@@ -1528,6 +1539,150 @@ async def brain_identity_list():
         return JSONResponse(content=r.json(), status_code=r.status_code)
     except Exception as e:
         log.error("Brain identity proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+# ---- Brain phase control -------------------------------------------------------
+
+@app.get("/api/brain/phase")
+async def brain_get_phase():
+    """Get current Brain operational phase."""
+    try:
+        r = await _brain_get("/api/phase")
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain phase GET proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.put("/api/brain/phase")
+async def brain_set_phase(request: Request):
+    """Set Brain operational phase (manual_switch, auto_demotion, re_promotion)."""
+    body = await request.json()
+    try:
+        r = await _brain_put("/api/phase", body=body)
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain phase PUT proxy error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+# ---- Brain test fixtures -------------------------------------------------------
+
+@app.get("/api/brain/test-fixtures")
+async def brain_list_fixtures(request: Request):
+    """List test fixtures (DRM lures and injection resistance)."""
+    try:
+        r = await _brain_get("/api/test-fixtures", params=dict(request.query_params))
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain test fixtures list proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.post("/api/brain/test-fixtures")
+async def brain_create_fixture(request: Request):
+    """Create a new test fixture (human-authored only)."""
+    body = await request.json()
+    try:
+        r = await _brain_post("/api/test-fixtures", body=body)
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain test fixture create proxy error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.patch("/api/brain/test-fixtures/batch-results")
+async def brain_fixture_batch_results(request: Request):
+    """Batch-update fixture last_result after a gate suite run."""
+    body = await request.json()
+    try:
+        r = await _brain_patch("/api/test-fixtures/batch-results", body=body)
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain fixture batch results proxy error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.patch("/api/brain/test-fixtures/{fixture_id}")
+async def brain_update_fixture(fixture_id: str, request: Request):
+    """Update a fixture (retire, add notes, update result)."""
+    body = await request.json()
+    try:
+        r = await _brain_patch(f"/api/test-fixtures/{fixture_id}", body=body)
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain fixture update proxy error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+# ---- Brain gate suite runner -------------------------------------------------------
+
+@app.post("/api/brain/gate-suite/run")
+async def brain_run_gate_suite(request: Request):
+    """Trigger T1 gate suite run (sandboxed). Returns results synchronously."""
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    try:
+        r = await _brain_post("/api/gate-suite/run", body=body, timeout=120.0)
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain gate suite run proxy error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.get("/api/brain/gate-suite/status")
+async def brain_gate_suite_status():
+    """Get latest gate suite results and Phase 4 readiness."""
+    try:
+        r = await _brain_get("/api/gate-suite/status")
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain gate suite status proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.get("/api/brain/health-monitor-state")
+async def brain_health_monitor_state():
+    """Get current health monitor state (rolling pass rate, clean cycles, etc.)."""
+    try:
+        r = await _brain_get("/api/health-monitor-state")
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain health monitor state proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.get("/api/brain/brain-config")
+async def brain_config_get(request: Request):
+    """Get brain config value(s)."""
+    try:
+        r = await _brain_get("/api/brain-config", params=dict(request.query_params))
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain config GET proxy error: %s", e)
+        raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
+
+
+@app.put("/api/brain/brain-config")
+async def brain_config_set(request: Request):
+    """Set a brain config key-value pair."""
+    body = await request.json()
+    try:
+        r = await _brain_put("/api/brain-config", body=body)
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain config PUT proxy error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.get("/api/brain/calibration")
+async def brain_calibration(request: Request):
+    """Get calibration metrics: rolling precision, Brier score, fatigue signal, rejection taxonomy."""
+    try:
+        r = await _brain_get("/api/calibration", params=dict(request.query_params))
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except Exception as e:
+        log.error("Brain calibration proxy error: %s", e)
         raise HTTPException(status_code=502, detail=f"Brain unreachable: {e}")
 
 

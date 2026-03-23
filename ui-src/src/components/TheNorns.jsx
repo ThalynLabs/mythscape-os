@@ -11,6 +11,8 @@
  */
 
 import { Fragment, useState, useEffect, useCallback } from "react";
+import { BrainPhaseControl } from "./BrainPhaseControl.jsx";
+import FixturePanel from "./FixturePanel.jsx";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -851,13 +853,39 @@ function Verdandi({ health, agents }) {
 }
 
 // ── Skuld: What Is Yet To Be ────────────────────────────────────────────────
-// Consolidation queue, pending anchor candidates, cron schedule
+// Consolidation queue, pending anchor candidates, calibration metrics, Phase 4 gate
+
+const REJECTION_REASONS = [
+  { value: "wrong_fact",       label: "Wrong fact" },
+  { value: "right_fact_wrong_slot", label: "Right fact, wrong slot" },
+  { value: "duplicate",        label: "Duplicate" },
+  { value: "premature",        label: "Premature" },
+  { value: "not_priority",     label: "Not priority" },
+];
+
+const PASS_TYPE_LABELS = {
+  micro: "Micro", intraday: "Intraday", daily: "Daily", weekly: "Weekly",
+};
+
+const GATE_CHECK_LABELS = {
+  F1: "DRM Fabrication Lure",
+  F2: "Source Attribution Sample",
+  F3: "Precision/Recall vs Gold",
+  F4: "Contradiction Scan",
+  F5: "Temporal Completeness",
+  F6: "Injection Resistance",
+  F7: "Single-Instance Traits",
+};
 
 function Skuld({ health }) {
   const [candidates, setCandidates] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [reviewingId, setReviewingId] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState({});
+  const [calibration, setCalibration] = useState(null);
+  const [gateStatus, setGateStatus] = useState(null);
+  const [healthMonitorState, setHealthMonitorState] = useState(null);
 
   const loadCandidates = useCallback(async () => {
     setLoading(true);
@@ -873,16 +901,55 @@ function Skuld({ health }) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadCandidates(); }, [loadCandidates]);
+  const loadCalibration = useCallback(async () => {
+    try {
+      const data = await brainFetch("/calibration", {
+        params: { user_id: VALERIE_UUID },
+      });
+      setCalibration(data);
+    } catch {
+      // Calibration endpoint not yet available — degrade gracefully
+    }
+  }, []);
+
+  const loadGateStatus = useCallback(async () => {
+    try {
+      const data = await brainFetch("/gate-suite/status");
+      setGateStatus(data);
+    } catch {
+      // Not yet wired — degrade gracefully
+    }
+  }, []);
+
+  const loadHealthState = useCallback(async () => {
+    try {
+      const data = await brainFetch("/health-monitor-state");
+      setHealthMonitorState(data);
+    } catch {
+      // Degrade gracefully
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCandidates();
+    loadCalibration();
+    loadGateStatus();
+    loadHealthState();
+  }, [loadCandidates, loadCalibration, loadGateStatus, loadHealthState]);
 
   const reviewCandidate = async (id, status) => {
     setReviewingId(id);
+    const reason = rejectionReason[id] || null;
     try {
       await brainFetch(`/anchor-candidates/${id}`, {
         method: "PATCH",
-        body: { status, reviewed_by: "valerie-well-ui" },
+        body: {
+          status,
+          reviewed_by:    "valerie-well-ui",
+          rejection_reason: status === "rejected" ? reason : undefined,
+        },
       });
-      // Reload
+      setRejectionReason(prev => { const n = {...prev}; delete n[id]; return n; });
       await loadCandidates();
     } catch (e) {
       setError(`Review failed: ${e.message}`);
@@ -890,10 +957,28 @@ function Skuld({ health }) {
     setReviewingId(null);
   };
 
-  const wakeActive = health?.wake_word?.active ?? false;
+  const wakeActive    = health?.wake_word?.active ?? false;
   const wakeDetections = health?.wake_word?.detections_last_hour ?? 0;
+  const pendingCount  = candidates?.count ?? 0;
 
-  const pendingCount = candidates?.count ?? 0;
+  // Calibration metrics
+  const rollingPrecision = calibration?.rolling_precision_30;
+  const allTimePrecision = calibration?.all_time_precision;
+  const precisionDrift   = rollingPrecision != null && allTimePrecision != null
+    ? Math.abs(rollingPrecision - allTimePrecision)
+    : null;
+  const recallEstimate       = calibration?.recall_estimate;
+  const brierScore           = calibration?.brier_score;
+  const fatigueSignal        = calibration?.fatigue_signal;
+  const rejectionTaxonomy    = calibration?.rejection_taxonomy || {};
+  const pendingByPassType    = calibration?.pending_by_pass_type || {};
+  const approvalByPassType   = calibration?.approval_rate_by_pass_type || {};
+  const anchorCoverage       = calibration?.anchor_coverage || [];
+
+  // Phase 4 gate status
+  const gateChecks   = gateStatus?.checks || {};
+  const allGatePass  = gateStatus?.all_pass === true;
+  const lastGateRun  = gateStatus?.last_run_at;
 
   return (
     <details className="norn-pane">
@@ -908,12 +993,183 @@ function Skuld({ health }) {
       <div className="norn-body">
         <p className="norn-desc">
           Skuld holds the obligations not yet fulfilled &mdash; anchor candidates awaiting review,
-          consolidation runs, and the rhythm of the agent's future work.
+          consolidation calibration, and the Phase 4 gate.
         </p>
 
         {error && <p className="rune-error">{error}</p>}
 
-        {/* Pending anchor candidates */}
+        {/* ── Phase 4 gate status ── */}
+        <section aria-label="Phase 4 gate">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h3>
+              Phase 4 gate
+              {" "}
+              <span
+                className={allGatePass ? "skuld-gate-ready" : "skuld-gate-blocked"}
+                aria-label={allGatePass ? "Ready for Phase 4" : "Not ready — gate checks pending"}
+              >
+                {allGatePass ? "● Ready" : "● Not ready"}
+              </span>
+            </h3>
+            <button
+              className="btn-refresh"
+              onClick={async () => {
+                try {
+                  await brainFetch("/gate-suite/run", { method: "POST" });
+                  setTimeout(() => loadGateStatus(), 3000);
+                } catch (e) {
+                  setError(`Gate suite run failed: ${e.message}`);
+                }
+              }}
+            >
+              Run gate suite
+            </button>
+          </div>
+          {lastGateRun && (
+            <p className="norns-result-meta">Last run: {fmtRelative(lastGateRun)}</p>
+          )}
+          <ul className="skuld-gate-list">
+            {Object.entries(GATE_CHECK_LABELS).map(([key, label]) => {
+              const check = gateChecks[key];
+              const status = check == null ? "—" : check.pass ? "✓" : "✗";
+              const cls    = check == null ? "" : check.pass ? "skuld-gate-pass" : "skuld-gate-fail";
+              return (
+                <li key={key} className={`skuld-gate-item ${cls}`}>
+                  <span className="skuld-gate-id">T1.{key}</span>
+                  <span className="skuld-gate-label">{label}</span>
+                  <span className="skuld-gate-status" aria-label={status}>{status}</span>
+                  {check?.reason && <span className="skuld-gate-reason">{truncate(check.reason, 80)}</span>}
+                </li>
+              );
+            })}
+          </ul>
+          {!allGatePass && (
+            <p className="norns-result-meta">
+              All 7 checks must pass + Valerie sign-off to authorize Phase 4.
+            </p>
+          )}
+        </section>
+
+        {/* ── Calibration metrics ── */}
+        <section aria-label="Calibration scoring">
+          <h3>Calibration scoring</h3>
+          <dl className="stat-grid">
+            <dt>Rolling precision (last 30)</dt>
+            <dd>
+              {rollingPrecision != null ? `${(rollingPrecision * 100).toFixed(1)}%` : "—"}
+              {precisionDrift != null && precisionDrift > 0.10 && (
+                <span className="skuld-drift-flag" title="Diverged from all-time by >10%"> ⚠</span>
+              )}
+            </dd>
+            <dt>All-time precision</dt>
+            <dd>{allTimePrecision != null ? `${(allTimePrecision * 100).toFixed(1)}%` : "—"}</dd>
+            <dt>Recall estimate</dt>
+            <dd>{recallEstimate != null ? `${(recallEstimate * 100).toFixed(1)}%` : "—"}</dd>
+            <dt>Brier score</dt>
+            <dd>
+              <span className={
+                brierScore == null ? "" :
+                brierScore <= 0.15 ? "skuld-brier-good" :
+                brierScore <= 0.25 ? "skuld-brier-warn" : "skuld-brier-fail"
+              }>
+                {brierScore != null ? brierScore.toFixed(3) : "—"}
+              </span>
+            </dd>
+            <dt>Fatigue signal</dt>
+            <dd>
+              {fatigueSignal == null ? "—" : fatigueSignal
+                ? <span className="skuld-fatigue-active">⚠ Correlated — decisions may be low-confidence</span>
+                : "None detected"}
+            </dd>
+            <dt>Health monitor</dt>
+            <dd>
+              {healthMonitorState
+                ? `${(( healthMonitorState.rolling_pass_rate ?? 1) * 100).toFixed(0)}% pass rate · ${healthMonitorState.cleanCycleCount ?? 0} clean cycles`
+                : "—"}
+            </dd>
+          </dl>
+
+          {/* Pending candidates by pass type */}
+          {Object.keys(pendingByPassType).length > 0 && (
+            <details className="skuld-rejection-details">
+              <summary>Pending by pass type</summary>
+              <dl className="stat-grid" style={{ marginTop: "0.5rem" }}>
+                {Object.entries(pendingByPassType).map(([pass, count]) => (
+                  <Fragment key={pass}>
+                    <dt>{PASS_TYPE_LABELS[pass] || pass}</dt>
+                    <dd>{count}</dd>
+                  </Fragment>
+                ))}
+              </dl>
+            </details>
+          )}
+
+          {/* Approval rate by pass type */}
+          {Object.keys(approvalByPassType).length > 0 && (
+            <details className="skuld-rejection-details">
+              <summary>Approval rate by pass type</summary>
+              <dl className="stat-grid" style={{ marginTop: "0.5rem" }}>
+                {Object.entries(approvalByPassType).map(([pass, data]) => {
+                  const isInverted = pass === "micro" && approvalByPassType.daily &&
+                    data.approval_rate > approvalByPassType.daily.approval_rate;
+                  return (
+                    <Fragment key={pass}>
+                      <dt>
+                        {PASS_TYPE_LABELS[pass] || pass}
+                        {isInverted && <span className="skuld-drift-flag" title="Micro > Daily — check for fatigue"> ⚠</span>}
+                      </dt>
+                      <dd>{(data.approval_rate * 100).toFixed(1)}% ({data.approved}/{data.total})</dd>
+                    </Fragment>
+                  );
+                })}
+              </dl>
+            </details>
+          )}
+
+          {/* Anchor coverage distribution */}
+          {anchorCoverage.length > 0 && (
+            <details className="skuld-rejection-details">
+              <summary>Anchor coverage (last 30 days)</summary>
+              <dl className="stat-grid" style={{ marginTop: "0.5rem" }}>
+                {anchorCoverage.map(row => (
+                  <Fragment key={row.category}>
+                    <dt>{CATEGORY_LABELS[row.category] || row.category}</dt>
+                    <dd>
+                      {row.count}
+                      {row.delta !== 0 && (
+                        <span
+                          className={row.delta > 0 ? "skuld-delta-up" : "skuld-delta-down"}
+                          title="Delta vs prior 30 days"
+                        >
+                          {" "}{row.delta > 0 ? `+${row.delta}` : row.delta}
+                        </span>
+                      )}
+                    </dd>
+                  </Fragment>
+                ))}
+              </dl>
+            </details>
+          )}
+
+          {/* Rejection taxonomy */}
+          {Object.keys(rejectionTaxonomy).length > 0 && (
+            <details className="skuld-rejection-details">
+              <summary>Rejection taxonomy</summary>
+              <ul className="skuld-rejection-list">
+                {Object.entries(rejectionTaxonomy).map(([reason, count]) => (
+                  <li key={reason}>
+                    <span className="skuld-rejection-reason">
+                      {REJECTION_REASONS.find(r => r.value === reason)?.label || reason}
+                    </span>
+                    <span className="skuld-rejection-count">{count}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
+
+        {/* ── Pending anchor candidates ── */}
         <section aria-label="Anchor candidates">
           <h3>Pending anchor candidates ({pendingCount})</h3>
           {loading && <p className="rune-loading">Reading the future threads...</p>}
@@ -925,7 +1181,13 @@ function Skuld({ health }) {
                   <div className="norns-result-header">
                     <span className="norns-badge norns-badge-cat">{c.category}</span>
                     {c.anchor_type && <span className="norns-badge norns-badge-decay">{c.anchor_type}</span>}
+                    <span className="norns-badge norns-badge-decay">
+                      {PASS_TYPE_LABELS[c.consolidation_pass] || c.consolidation_pass}
+                    </span>
                     <span className="norns-score">conf: {(c.confidence * 100).toFixed(0)}%</span>
+                    {c.provenance?.source_type && (
+                      <span className="norns-badge norns-badge-source">{c.provenance.source_type}</span>
+                    )}
                   </div>
                   <p className="norns-result-text"><strong>{c.slot_key}:</strong> {c.gist}</p>
                   {c.significance && <p className="norns-result-meta">{c.significance}</p>}
@@ -935,10 +1197,27 @@ function Skuld({ health }) {
                     </p>
                   )}
                   <div className="norns-result-meta">
-                    <span>Pass: {c.consolidation_pass}</span>
-                    {c.subject && <span> &middot; Subject: {c.subject}</span>}
-                    <span> &middot; {fmtRelative(c.created_at)}</span>
+                    {c.subject && <span>Subject: {c.subject} &middot; </span>}
+                    <span>{fmtRelative(c.created_at)}</span>
                   </div>
+                  {/* Rejection reason (optional — 30% tagging coverage still reveals patterns) */}
+                  <details className="skuld-rejection-picker">
+                    <summary className="skuld-rejection-toggle">Rejection reason (optional)</summary>
+                    <div className="skuld-rejection-options">
+                      {REJECTION_REASONS.map(r => (
+                        <label key={r.value} className="skuld-rejection-option">
+                          <input
+                            type="radio"
+                            name={`rejection-${c.id}`}
+                            value={r.value}
+                            checked={rejectionReason[c.id] === r.value}
+                            onChange={() => setRejectionReason(prev => ({ ...prev, [c.id]: r.value }))}
+                          />
+                          {r.label}
+                        </label>
+                      ))}
+                    </div>
+                  </details>
                   <div className="norns-candidate-actions">
                     <button
                       className="btn-refresh norns-btn-approve"
@@ -986,7 +1265,7 @@ function Skuld({ health }) {
           </p>
         </section>
 
-        <button className="btn-refresh" onClick={loadCandidates} style={{ marginTop: "0.5rem" }}>
+        <button className="btn-refresh" onClick={() => { loadCandidates(); loadCalibration(); loadGateStatus(); loadHealthState(); }} style={{ marginTop: "0.5rem" }}>
           Refresh
         </button>
       </div>
@@ -1006,6 +1285,20 @@ export default function TheNorns({ health, agents }) {
       <Urd />
       <Verdandi health={health} agents={agents} />
       <Skuld health={health} />
+      <FixturePanel />
+      <details className="norn-pane">
+        <summary className="norn-heading">
+          <span className="norn-name">Phase</span>
+          <span className="norn-role">Manual phase control</span>
+        </summary>
+        <div className="norn-body">
+          <p className="norn-desc">
+            Directly override the Brain's operational phase. Changes are logged with manual_switch tag.
+            Auto-demotion from Phase 4 to Phase 3 happens automatically on health check failure.
+          </p>
+          <BrainPhaseControl />
+        </div>
+      </details>
     </div>
   );
 }
