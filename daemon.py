@@ -1258,8 +1258,9 @@ async def wake_agent(agentId: str, req: WakeRequest):
     """
     cfg = read_openclaw_cfg()
     agents_cfg = cfg.get("agents", {})
-    # Agent IDs are top-level keys under "agents" (excluding "defaults")
-    known_ids = [k for k in agents_cfg if k != "defaults"]
+    # Agent IDs live in agents.list[] — extract them from the array of agent objects.
+    # The top-level keys are "defaults" and "list", not individual agent IDs.
+    known_ids = [a.get("id") for a in agents_cfg.get("list", []) if a.get("id")]
     if agentId not in known_ids:
         raise HTTPException(status_code=404, detail=f"Unknown agent: {agentId}")
 
