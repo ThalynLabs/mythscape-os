@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Urðarbrunnr Voice Daemon — Phase 1 + Chat + Settings Panel
-Runs as restricted OS user _openclaw-voice
+Urðarbrunnr Daemon — Phase 1 + Chat + Settings Panel
+Runs as restricted OS user _mythscape-os
 Port 9355 (W-E-L-L): Web UI + health + chat + settings API
 Port 9356: ElevenLabs middleware (Phase 3)
 
-Settings: /opt/openclaw-voice/settings.json
+Settings: /opt/mythscape-os/settings.json
 Conversation history: in-memory (per session-id), survives page refreshes not daemon restarts
 """
 
@@ -18,6 +18,7 @@ import mimetypes
 import os
 import pathlib
 import signal
+import subprocess
 import sys
 import time
 import uuid
@@ -40,22 +41,22 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
-log = logging.getLogger("voice-daemon")
+log = logging.getLogger("well-daemon")
 
 # ---------------------------------------------------------------------------
 # Paths & constants
 # ---------------------------------------------------------------------------
 
-DAEMON_DIR        = pathlib.Path("/opt/openclaw-voice")
-ATTACH_DIR        = pathlib.Path("/tmp/openclaw-voice-attachments")
+DAEMON_DIR        = pathlib.Path("/opt/mythscape-os")
+ATTACH_DIR        = pathlib.Path("/tmp/mythscape-os-attachments")
 MAX_ATTACH_B64    = 20 * 1024 * 1024  # 20 MB base64 limit (~15 MB image)
 # Serve UI from workspace so updates don't require sudo deploy
-# Falls back to /opt/openclaw-voice/ui if workspace isn't readable
+# Falls back to /opt/mythscape-os/ui if workspace isn't readable
 _WORKSPACE_UI     = pathlib.Path("/Users/threadweaver/.openclaw/workspace/mythscape-os/ui")
 UI_DIR            = _WORKSPACE_UI if _WORKSPACE_UI.exists() else DAEMON_DIR / "ui"
 SETTINGS_FILE     = DAEMON_DIR / "settings.json"
-PID_FILE          = pathlib.Path("/var/run/openclaw-voice/daemon.pid")
-LOG_FILE          = pathlib.Path("/var/log/openclaw-voice/daemon.log")
+PID_FILE          = pathlib.Path("/var/run/mythscape-os/daemon.pid")
+LOG_FILE          = pathlib.Path("/var/log/mythscape-os/daemon.log")
 OPENCLAW_CFG_PATH = pathlib.Path(os.environ.get("OPENCLAW_CFG_PATH", "/Users/threadweaver/.openclaw/openclaw.json"))
 WORKSPACE_ROOT    = pathlib.Path("/Users/threadweaver/.openclaw/workspace")
 ELEVENLABS_VOICES_URL = "https://api.elevenlabs.io/v1/voices"
@@ -159,21 +160,34 @@ def get_elevenlabs_key() -> str | None:
 
 def get_gateway_token() -> str | None:
     # 1. Env var (passed by gateway plugin)
-    token = os.environ.get("OPENCLAW_VOICE_TOKEN")
+    token = os.environ.get("MYTHSCAPE_OS_TOKEN")
     if token and not token.startswith("__OPENCLAW"):
         return token
-    # 2. Token file — written by plugin or setup at /tmp/openclaw-voice.token
-    token_file = pathlib.Path("/tmp/openclaw-voice.token")
+    # 2. Token file — written by plugin or setup at /tmp/mythscape-os.token
+    token_file = pathlib.Path("/tmp/mythscape-os.token")
     if token_file.exists():
         try:
             t = token_file.read_text().strip()
             if t:
-                log.info("Token loaded from /tmp/openclaw-voice.token")
+                log.info("Token loaded from /tmp/mythscape-os.token")
                 return t
         except Exception as e:
             log.warning(f"Could not read token file: {e}")
-    # 3. Config file fallback
-    return read_openclaw_cfg().get("gateway", {}).get("auth", {}).get("token")
+    # 3. Keychain fallback — the gateway token is stored as a SecretRef in openclaw.json
+    # (source: exec, provider: keychain, id: GATEWAY_AUTH_TOKEN). Read it directly
+    # from the macOS keychain rather than trying to resolve the SecretRef object.
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", "openclaw", "-a", "GATEWAY_AUTH_TOKEN", "-w"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception as e:
+        log.warning(f"Keychain token lookup failed: {e}")
+    # 4. Config file fallback (may return a SecretRef dict — caller handles None)
+    raw = read_openclaw_cfg().get("gateway", {}).get("auth", {}).get("token")
+    return raw if isinstance(raw, str) else None
 
 
 def get_known_agents() -> list[dict]:
@@ -372,7 +386,7 @@ _state: dict[str, Any] = {
     "started_at":   None,
     "config":       {},
     "status":       "starting",
-    "restart_count": int(os.environ.get("OPENCLAW_VOICE_RESTART_COUNT", "0")),
+    "restart_count": int(os.environ.get("MYTHSCAPE_OS_RESTART_COUNT", "0")),
     "wake_active":  False,
     "wake_detections_last_hour": 0,
 }
@@ -411,7 +425,7 @@ async def _refresh_update_info():
     """Check npm registry for the latest OpenClaw version.
 
     Uses the npm registry HTTP API directly — no npm binary needed, so it
-    works under the restricted _openclaw-voice user. Compares installed
+    works under the restricted _mythscape-os user. Compares installed
     version (from package.json) against registry latest. Cached in _state.
 
     The Well surfaces this as an amber banner: "Mythscape OS · The Well —
@@ -718,7 +732,7 @@ async def get_sessions():
 
     Uses the gateway /tools/invoke endpoint with sessions_list.
     The sessions.json file is owned by threadweaver (mode 600) and unreadable by
-    the _openclaw-voice daemon user — so we go through the gateway which has
+    the _mythscape-os daemon user — so we go through the gateway which has
     its own auth and can read the file through the OpenClaw process.
     Gateway token is read from openclaw.json at startup via _state config.
     """
@@ -974,7 +988,7 @@ async def get_nodes():
 async def run_update():
     """Run `openclaw update` via the gateway exec tool.
 
-    The daemon runs as _openclaw-voice and can't write to npm's global
+    The daemon runs as _mythscape-os and can't write to npm's global
     prefix. But the gateway runs as the user (threadweaver), so we
     proxy the update command through it. Returns stdout/stderr so the UI
     can show what happened.
@@ -1015,7 +1029,7 @@ async def run_update():
 async def speak(request: Request):
     """Generate TTS audio and return it as base64 for the browser to play.
 
-    The daemon runs as _openclaw-voice — a background service user with no
+    The daemon runs as _mythscape-os — a background service user with no
     audio session. It cannot play audio directly. The correct architecture:
     generate audio here, return base64, browser plays it via <audio>.
 
@@ -1840,7 +1854,7 @@ signal.signal(signal.SIGINT, handle_shutdown)
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Urðarbrunnr Voice Daemon")
+    parser = argparse.ArgumentParser(description="Urðarbrunnr Daemon")
     parser.add_argument("--host",        default=DEFAULT_HOST,        help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port",        type=int, default=DEFAULT_PORT)
     parser.add_argument("--mw-port",     type=int, default=DEFAULT_MW_PORT)
@@ -1851,8 +1865,8 @@ def main():
         "gateway_url": os.environ.get("OPENCLAW_GATEWAY_URL", args.gateway_url),
         "agent_id":    os.environ.get("OPENCLAW_AGENT_ID",    "sethren-voice"),
         "host":        args.host,
-        "port":        int(os.environ.get("OPENCLAW_VOICE_PORT",    args.port)),
-        "mw_port":     int(os.environ.get("OPENCLAW_VOICE_MW_PORT", args.mw_port)),
+        "port":        int(os.environ.get("MYTHSCAPE_OS_PORT",    args.port)),
+        "mw_port":     int(os.environ.get("MYTHSCAPE_OS_MW_PORT", args.mw_port)),
     }
 
     _state["config"]     = config
