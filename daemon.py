@@ -1230,6 +1230,100 @@ async def get_agents():
 
 
 # ---------------------------------------------------------------------------
+# Agent wake endpoint — The Court's reverse trigger
+# ---------------------------------------------------------------------------
+# The Court panel (and future automation) reaches into the castle to summon
+# an agent directly. The daemon validates the agent exists, then forwards
+# the message through the gateway's /v1/chat/completions endpoint (non-streaming).
+# This is the proven pattern — same approach the streaming chat endpoint uses,
+# just without the SSE dance.
+
+
+class WakeRequest(BaseModel):
+    message: str
+    sessionLabel: str = ""
+
+
+@app.post("/api/agents/{agentId}/wake")
+async def wake_agent(agentId: str, req: WakeRequest):
+    """Wake an agent with a message — the Court's reverse trigger.
+
+    Sends a message to a named agent through the gateway, creating a new
+    session if needed. This is how the Court panel (and future automation)
+    reaches into the castle to summon an agent directly.
+
+    The gateway handles session creation and routing — the daemon just
+    validates the agent exists and forwards the request. Like a herald
+    announcing a visitor at the gate: check the guest list, then let them through.
+    """
+    cfg = read_openclaw_cfg()
+    agents_cfg = cfg.get("agents", {})
+    # Agent IDs are top-level keys under "agents" (excluding "defaults")
+    known_ids = [k for k in agents_cfg if k != "defaults"]
+    if agentId not in known_ids:
+        raise HTTPException(status_code=404, detail=f"Unknown agent: {agentId}")
+
+    token = get_gateway_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Gateway token not available")
+
+    gateway_url = _state["config"].get("gateway_url", DEFAULT_GATEWAY_URL)
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=120, write=30, pool=5)) as client:
+            resp = await client.post(
+                f"{gateway_url}/v1/chat/completions",
+                json={
+                    "model": f"openclaw:{agentId}",
+                    "messages": [{"role": "user", "content": req.message}],
+                    "stream": False,
+                },
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+            )
+
+        if resp.status_code != 200:
+            error_text = resp.text[:200]
+            return JSONResponse(
+                status_code=502,
+                content={"ok": False, "error": f"Gateway error {resp.status_code}: {error_text}"}
+            )
+
+        data = resp.json()
+        reply = ""
+        try:
+            reply = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError):
+            reply = str(data)
+
+        return {
+            "ok": True,
+            "reply": reply,
+            "model": data.get("model", ""),
+            "sessionKey": data.get("session_key", data.get("id", "")),
+        }
+
+    except httpx.TimeoutException:
+        return JSONResponse(
+            status_code=504,
+            content={"ok": False, "error": "Gateway timeout — agent may be starting up. Try again."}
+        )
+    except httpx.ConnectError:
+        return JSONResponse(
+            status_code=502,
+            content={"ok": False, "error": "Cannot reach gateway — is OpenClaw running?"}
+        )
+    except Exception as e:
+        log.error(f"Wake agent error ({agentId}): {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": str(e)}
+        )
+
+
+# ---------------------------------------------------------------------------
 # Brain proxy routes — The Brain episodic memory & conversation archive
 # ---------------------------------------------------------------------------
 # The Brain runs on port 3008 as a separate Node.js service.

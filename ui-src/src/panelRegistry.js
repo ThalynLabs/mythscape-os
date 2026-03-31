@@ -231,6 +231,18 @@ const CORE_PANELS = [
     tags: ["pipeline", "approvals", "zion", "hermes", "zeus", "atropos", "clotho", "lachesis", "decisions", "traces"],
     description: "The Greek Fates tend the pipeline. Atropos holds what must be approved. Clotho spins what is being wired. Lachesis measures what has been shaped.",
   },
+  {
+    id: "court",
+    label: "The Court",
+    icon: "⚔",
+    category: "process",
+    order: 2,
+    defaultVisible: true,
+    defaultPinned: false,
+    source: "core",
+    tags: ["agents", "rooms", "court", "wake", "interact", "send", "message"],
+    description: "The agents' court — where you summon and speak with the castle's agents directly.",
+  },
 
   // ── Capability ───────────────────────────────────────────────────────────────
   {

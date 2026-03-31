@@ -1909,3 +1909,179 @@ body {
   flex-shrink: 0;
 }
 .update-dismiss:hover { opacity: 1; color: var(--well-amber, #c8922a); }
+
+/* ── The Court — Agent Rooms Panel ────────────────────────────────────────── */
+
+.court-agent-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.court-agent-item {
+  background: var(--well-stone);
+  border: 1px solid var(--well-rim);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color var(--ease);
+}
+
+.court-agent-item:hover,
+.court-agent-item:focus-within {
+  border-color: var(--well-mist);
+}
+
+.court-agent-expanded {
+  border-color: var(--well-water);
+}
+
+.court-agent-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.court-agent-header:hover {
+  background: var(--well-deep);
+}
+
+.court-agent-name {
+  font-weight: 600;
+  flex: 1;
+}
+
+.court-agent-model {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+}
+
+.court-agent-chevron {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.court-room {
+  padding: 0 1rem 1rem;
+  border-top: 1px solid var(--well-rim);
+}
+
+.court-messages {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0.75rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.court-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 0.5rem 0;
+}
+
+.court-message {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+}
+
+.court-message-user {
+  background: var(--well-deep);
+  border-left: 2px solid var(--well-water);
+}
+
+.court-message-assistant {
+  background: var(--well-deep);
+  border-left: 2px solid var(--well-rune);
+}
+
+.court-message-role {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.court-message-content {
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.court-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  margin-top: 0.5rem;
+}
+
+.court-input {
+  flex: 1;
+  background: var(--well-void);
+  border: 1px solid var(--well-rim);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.75rem;
+  resize: vertical;
+  min-height: 2.5rem;
+  max-height: 8rem;
+}
+
+.court-input:focus {
+  border-color: var(--well-water);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(79, 179, 212, 0.2);
+}
+
+.court-input:disabled {
+  opacity: 0.6;
+}
+
+.court-send-btn {
+  background: var(--well-water);
+  color: var(--well-void);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 1.25rem;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--ease), opacity var(--ease);
+}
+
+.court-send-btn:hover:not(:disabled) {
+  background: #5ec3e4;
+}
+
+.court-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.court-error {
+  display: block;
+  color: var(--well-blood);
+  font-size: 0.85rem;
+  padding: 0.5rem 0;
+}

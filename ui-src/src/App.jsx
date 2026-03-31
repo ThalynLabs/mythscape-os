@@ -17,6 +17,7 @@ import TheBranches    from "./components/TheBranches.jsx";
 import TheVoice       from "./components/TheVoice.jsx";
 import TheNodes       from "./components/TheNodes.jsx";
 import TheSkein       from "./components/TheSkein.jsx";
+import RoomsPanel     from "./components/RoomsPanel.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
 import { BrainPhaseHeaderIndicator } from "./components/BrainPhaseControl.jsx";
 import { panelRegistry } from "./panelRegistry.js";
@@ -423,6 +424,8 @@ export default function App() {
         return <TheSkein />;
       case "threads":
         return <TheThreads />;
+      case "court":
+        return <RoomsPanel agents={[]} />;
       case "roots":
         return <TheRoots />;
       case "branches":
