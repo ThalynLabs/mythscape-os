@@ -159,10 +159,13 @@ def get_elevenlabs_key() -> str | None:
 
 
 def get_gateway_token() -> str | None:
-    # 1. Env var (passed by gateway plugin)
-    token = os.environ.get("MYTHSCAPE_OS_TOKEN")
-    if token and not token.startswith("__OPENCLAW"):
-        return token
+    # 1. Env var (passed by gateway plugin).
+    # Try both the current name and the legacy name — the plugin may inject either
+    # depending on which version of OpenClaw is running.
+    for env_key in ("MYTHSCAPE_OS_TOKEN", "OPENCLAW_VOICE_TOKEN"):
+        token = os.environ.get(env_key)
+        if token and not token.startswith("__OPENCLAW"):
+            return token
     # 2. Token file — written by plugin or setup at /tmp/mythscape-os.token
     token_file = pathlib.Path("/tmp/mythscape-os.token")
     if token_file.exists():
