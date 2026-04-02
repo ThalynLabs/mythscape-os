@@ -1,6 +1,6 @@
 /**
  * Mythscape OS Plugin
- * OpenClaw plugin that manages the Mythscape OS voice daemon lifecycle.
+ * OpenClaw plugin that manages the Mythscape OS daemon lifecycle.
  *
  * Pattern A: Gateway plugin owns daemon start/stop/restart.
  *
@@ -20,7 +20,7 @@ import { unlink, writeFile } from "fs/promises";
 
 const DEFAULTS = {
   daemonPath: "/opt/mythscape-os/daemon.py",
-  daemonUser: "_openclaw-voice",
+  daemonUser: "_mythscape-os",
   pythonBin: "/opt/mythscape-os/.venv/bin/python",
   port: 9800,
   mwPort: 9801,
@@ -163,13 +163,13 @@ function spawnDaemon(
     OPENCLAW_AGENT_ID: "sethren-voice",
     OPENCLAW_VOICE_RESTART_COUNT: String(restartCount),
   };
-  if (token) env.OPENCLAW_VOICE_TOKEN = token;
+  if (token) env.MYTHSCAPE_OS_TOKEN = token;
   // Pass config path and ElevenLabs key explicitly — daemon home is /var/empty
   env.OPENCLAW_CFG_PATH = "/Users/threadweaver/.openclaw/openclaw.json";
   const elevenKey = (api.config as any)?.env?.ELEVENLABS_API_KEY;
   if (elevenKey) env.ELEVENLABS_API_KEY = elevenKey;
 
-  // spawn: sudo -u _openclaw-voice <python> <daemon.py> [args]
+  // spawn: sudo -u _mythscape-os <python> <daemon.py> [args]
   const child = spawn(
     "sudo",
     ["-n", "-u", cfg.daemonUser, cfg.pythonBin, ...args],
@@ -179,10 +179,10 @@ function spawnDaemon(
   log(api, "info", `Spawned daemon PID ${child.pid ?? "?"} as ${cfg.daemonUser}`);
 
   child.stdout?.on("data", (d: Buffer) => {
-    process.stdout.write(`[voice-daemon] ${d}`);
+    process.stdout.write(`[mythscape-os] ${d}`);
   });
   child.stderr?.on("data", (d: Buffer) => {
-    process.stderr.write(`[voice-daemon:err] ${d}`);
+    process.stderr.write(`[mythscape-os:err] ${d}`);
   });
 
   return child;
@@ -376,7 +376,7 @@ export default function register(api: any) {
   api.registerTool(
     {
       name: "voice_interface_status",
-      description: "Check the status of the Mythscape OS voice daemon (health, uptime, restart count).",
+      description: "Check the status of the Mythscape OS daemon (health, uptime, restart count).",
       parameters: { type: "object", properties: {}, required: [] },
       async execute(_id: string, _params: any) {
         const cfg = getPluginConfig(api);

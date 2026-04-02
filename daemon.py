@@ -165,7 +165,7 @@ def get_gateway_token() -> str | None:
     # 1. Env var (passed by gateway plugin).
     # Try both the current name and the legacy name — the plugin may inject either
     # depending on which version of OpenClaw is running.
-    for env_key in ("MYTHSCAPE_OS_TOKEN", "OPENCLAW_VOICE_TOKEN"):
+    for env_key in ("MYTHSCAPE_OS_TOKEN",):
         token = os.environ.get(env_key)
         if token and not token.startswith("__OPENCLAW"):
             return token

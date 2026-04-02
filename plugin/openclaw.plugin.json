@@ -2,7 +2,7 @@
   "id": "mythscape-os",
   "name": "Mythscape OS",
   "version": "1.0.0",
-  "description": "Manages the Mythscape OS voice daemon lifecycle — wake-word detection, ElevenLabs middleware, Web UI.",
+  "description": "Manages the Mythscape OS daemon lifecycle — The Well UI, wake-word, ElevenLabs middleware, OpenClaw integration.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -40,9 +40,9 @@
     }
   },
   "uiHints": {
-    "daemon.path": { "label": "Daemon script path", "placeholder": "/opt/openclaw-voice/daemon.py" },
-    "daemon.user": { "label": "Restricted OS user", "placeholder": "_openclaw-voice" },
-    "daemon.python": { "label": "Python binary (venv)", "placeholder": "/opt/openclaw-voice/.venv/bin/python" },
+    "daemon.path": { "label": "Daemon script path", "placeholder": "/opt/mythscape-os/daemon.py" },
+    "daemon.user": { "label": "Restricted OS user", "placeholder": "_mythscape-os" },
+    "daemon.python": { "label": "Python binary (venv)", "placeholder": "/opt/mythscape-os/.venv/bin/python" },
     "daemon.port": { "label": "Web UI / health port", "placeholder": "9800" },
     "middleware.port": { "label": "ElevenLabs middleware port", "placeholder": "9801" },
     "lifecycle.restart_max": { "label": "Max crash restarts", "placeholder": "3" },
