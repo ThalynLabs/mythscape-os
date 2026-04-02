@@ -1,12 +1,12 @@
 /**
- * Urðarbrunnr Voice Interface Plugin
- * OpenClaw plugin that manages the voice daemon lifecycle.
+ * Mythscape OS Plugin
+ * OpenClaw plugin that manages the Mythscape OS voice daemon lifecycle.
  *
  * Pattern A: Gateway plugin owns daemon start/stop/restart.
  *
  * Registers:
  *   - Background service: starts/stops daemon alongside the gateway
- *   - Gateway RPC: voice-interface.status
+ *   - Gateway RPC: mythscape-os.status
  *   - Agent tool: voice_interface_status (optional, read-only)
  */
 
@@ -61,7 +61,7 @@ const state: DaemonState = {
 // ---------------------------------------------------------------------------
 
 function getPluginConfig(api: any) {
-  // api.pluginConfig is the plugin-specific config block (plugins.entries.voice-interface.config)
+  // api.pluginConfig is the plugin-specific config block (plugins.entries.mythscape-os.config)
   const raw = (api.pluginConfig ?? {}) as any;
   return {
     daemonPath: raw.daemon?.path ?? DEFAULTS.daemonPath,
@@ -87,7 +87,7 @@ function getGatewayToken(api: any): string | null {
 }
 
 function log(api: any, level: "info" | "warn" | "error", msg: string) {
-  const prefix = `[voice-interface] ${msg}`;
+  const prefix = `[mythscape-os] ${msg}`;
   // Use both api.logger and console to ensure visibility
   console.log(`${level.toUpperCase()}: ${prefix}`);
   if (api?.logger?.[level]) {
@@ -126,7 +126,7 @@ async function writePid(pid: number) {
   try {
     await writeFile(DEFAULTS.pidFile, String(pid), "utf8");
   } catch (e) {
-    console.warn(`[voice-interface] Could not write PID: ${e}`);
+    console.warn(`[mythscape-os] Could not write PID: ${e}`);
   }
 }
 
@@ -323,7 +323,7 @@ async function stopDaemon(cfg: ReturnType<typeof getPluginConfig>, api: any) {
 export default function register(api: any) {
   // --- Background service (lifecycle) ---
   api.registerService({
-    id: "voice-interface",
+    id: "mythscape-os",
 
     start: async () => {
       log(api, "info", "Service start() called");
@@ -350,12 +350,12 @@ export default function register(api: any) {
   });
 
   // --- Gateway RPC: status ---
-  api.registerGatewayMethod("voice-interface.status", async ({ respond }: any) => {
+  api.registerGatewayMethod("mythscape-os.status", async ({ respond }: any) => {
     const cfg = getPluginConfig(api);
     const daemonStatus = await queryDaemonStatus(cfg.port);
     const uptime = state.startedAt ? Math.floor((Date.now() - state.startedAt) / 1000) : null;
     respond(true, {
-      plugin: "voice-interface",
+      plugin: "mythscape-os",
       version: "1.0.0",
       daemon: {
         status: state.status,
@@ -376,7 +376,7 @@ export default function register(api: any) {
   api.registerTool(
     {
       name: "voice_interface_status",
-      description: "Check the status of the Urðarbrunnr voice daemon (health, uptime, restart count).",
+      description: "Check the status of the Mythscape OS voice daemon (health, uptime, restart count).",
       parameters: { type: "object", properties: {}, required: [] },
       async execute(_id: string, _params: any) {
         const cfg = getPluginConfig(api);

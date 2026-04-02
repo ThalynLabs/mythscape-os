@@ -26,6 +26,29 @@ function modelLabel(model) {
     .replace(/^(.)/, c => c.toUpperCase());
 }
 
+// ── useCourtRoster ──────────────────────────────────────────────────────────────────
+function useCourtRoster() {
+  const [roster,    setRoster]    = useState(null);
+  const [rosterErr, setRosterErr] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/court/roster")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) { setRosterErr("No response from daemon"); return; }
+        if (data.ok && data.content) {
+          setRoster(data.content);
+          setRosterErr(null);
+        } else {
+          setRosterErr(data.error || "Unknown error");
+        }
+      })
+      .catch(e => setRosterErr(e.message));
+  }, []);
+
+  return { roster, rosterErr };
+}
+
 export default function RoomsPanel({ agents }) {
   const [agentList, setAgentList] = useState([]);
   const [expanded, setExpanded] = useState(null);
@@ -35,6 +58,9 @@ export default function RoomsPanel({ agents }) {
   const [error, setError] = useState(null);
   const inputRef = useRef(null);
   const messagesEndRef = useRef(null);
+
+  // Phase 4: court roster
+  const { roster, rosterErr } = useCourtRoster();
 
   // Fetch agents from daemon
   useEffect(() => {
@@ -230,6 +256,31 @@ export default function RoomsPanel({ agents }) {
       {agentList.length === 0 && (
         <p className="court-empty">No agents found. The Court stands empty.</p>
       )}
+
+      {/* Phase 4: Court hierarchy roster from Hermes
+          Collapsible <details>/<summary> — VoiceOver reads <summary> then expands.
+          <pre> preserves the markdown structure (code blocks, tables, sections).
+          aria-label on <pre> gives VoiceOver a useful announcement. */}
+      <details className="court-roster">
+        <summary className="court-roster-heading">
+          Court hierarchy — squad assignments
+        </summary>
+        {rosterErr && (
+          <output className="court-error" role="alert">
+            Could not load roster: {rosterErr}
+          </output>
+        )}
+        {!rosterErr && !roster && (
+          <p className="muted" style={{ marginTop: "0.5rem" }}>Loading roster…</p>
+        )}
+        {roster && (
+          <pre
+            className="court-roster-body"
+            aria-label="Court hierarchy roster — squad assignments"
+            tabIndex={0}
+          >{roster}</pre>
+        )}
+      </details>
     </div>
   );
 }

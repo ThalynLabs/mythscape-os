@@ -60,6 +60,9 @@ LOG_FILE          = pathlib.Path("/var/log/mythscape-os/daemon.log")
 OPENCLAW_CFG_PATH = pathlib.Path(os.environ.get("OPENCLAW_CFG_PATH", "/Users/threadweaver/.openclaw/openclaw.json"))
 WORKSPACE_ROOT    = pathlib.Path("/Users/threadweaver/.openclaw/workspace")
 ELEVENLABS_VOICES_URL = "https://api.elevenlabs.io/v1/voices"
+EXEC_APPROVALS_PATH   = pathlib.Path.home() / ".openclaw" / "exec-approvals.json"
+CIRCUIT_BREAKER_REPORT = pathlib.Path("/opt/mythscape-os/circuit-breaker.json")
+CRON_JOBS_PATH        = pathlib.Path.home() / ".openclaw" / "cron" / "jobs.json"
 
 DEFAULT_GATEWAY_URL = "http://localhost:18789"
 DEFAULT_PORT        = 9355
@@ -1244,6 +1247,107 @@ async def get_agents():
         agent["displayName"] = agent_settings.get("displayName", agent["displayName"])
         agent["agentId"]     = agent_settings.get("agentId",     agent.get("agentId", "main"))
     return {"ok": True, "agents": agents}
+
+
+# ---------------------------------------------------------------------------
+# Security posture endpoint — The Hearth's data source
+# ---------------------------------------------------------------------------
+
+@app.get("/api/security")
+async def get_security():
+    """Return security posture for The Hearth panel.
+
+    Reads exec-approvals.json (stripping socket token), the circuit breaker
+    report, and derives gateway health from daemon state.
+    """
+    result = {"ok": True, "execApprovals": None, "circuitBreaker": None, "gatewayHealth": None}
+
+    if EXEC_APPROVALS_PATH.exists():
+        try:
+            data = json.loads(EXEC_APPROVALS_PATH.read_text())
+            data.pop("socket", None)  # strip socket token
+            for agent_id, agent_cfg in data.get("agents", {}).items():
+                if "allowlist" in agent_cfg:
+                    agent_cfg["allowlistCount"] = len(agent_cfg.pop("allowlist"))
+            result["execApprovals"] = data
+        except Exception as e:
+            result["execApprovals"] = {"error": str(e)}
+
+    if CIRCUIT_BREAKER_REPORT.exists():
+        try:
+            result["circuitBreaker"] = json.loads(CIRCUIT_BREAKER_REPORT.read_text())
+        except Exception as e:
+            result["circuitBreaker"] = {"error": str(e)}
+
+    result["gatewayHealth"] = {"status": "healthy" if _state.get("status") == "healthy" else "unreachable"}
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Cron schedule endpoint — Skuld's schedule data source
+# ---------------------------------------------------------------------------
+
+@app.get("/api/cron")
+async def get_cron():
+    """Return scheduled cron jobs for Skuld's schedule display."""
+    if not CRON_JOBS_PATH.exists():
+        return {"ok": False, "error": "No cron jobs found"}
+    try:
+        data = json.loads(CRON_JOBS_PATH.read_text())
+        # Structure: { "version": 1, "jobs": [...] }
+        raw_jobs = data.get("jobs", []) if isinstance(data, dict) else data
+        jobs = []
+        for job in raw_jobs:
+            schedule = job.get("schedule", {})
+            kind = schedule.get("kind", "—")
+            expr = schedule.get("expr") or schedule.get("at") or ""
+            tz = schedule.get("tz", "")
+            schedule_human = expr
+            if kind == "cron" and expr:
+                schedule_human = f"cron: {expr}" + (f" ({tz})" if tz else "")
+            elif kind == "at" and expr:
+                try:
+                    from datetime import datetime as _dt
+                    dt = _dt.fromisoformat(expr.replace("Z", "+00:00"))
+                    schedule_human = f"once: {dt.strftime('%Y-%m-%d %H:%M UTC')}"
+                except Exception:
+                    schedule_human = f"at: {expr}"
+            jobs.append({
+                "id": job.get("id", ""),
+                "name": job.get("name", "Unnamed"),
+                "enabled": job.get("enabled", True),
+                "agent": job.get("sessionTarget", "main"),
+                "scheduleKind": kind,
+                "scheduleExpr": schedule_human,
+                "deleteAfterRun": job.get("deleteAfterRun", False),
+                "lastRunStatus": job.get("state", {}).get("lastRunStatus"),
+                "nextRunAtMs": job.get("state", {}).get("nextRunAtMs"),
+            })
+        jobs.sort(key=lambda j: (not j["enabled"], j["name"].lower()))
+        return {"ok": True, "jobs": jobs}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Court roster endpoint — Phase 4
+# ---------------------------------------------------------------------------
+
+_COURT_FILES = {
+    "ROSTER.md": pathlib.Path("/Users/threadweaver/.openclaw/workspace-hermes/ROSTER.md"),
+}
+
+@app.get("/api/court/roster")
+async def get_roster():
+    """Return the court hierarchy roster for The Court panel."""
+    path = _COURT_FILES["ROSTER.md"]
+    if not path.exists():
+        return {"ok": False, "error": "Roster not found"}
+    try:
+        return {"ok": True, "content": path.read_text(), "format": "markdown"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 # ---------------------------------------------------------------------------

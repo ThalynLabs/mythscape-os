@@ -40,26 +40,205 @@ function useGatewayHealth() {
   return health;
 }
 
-// ── Session usage stats ───────────────────────────────────────────────────────
-// Fetches message count from /api/chat/history for the current session.
-// Tokens and cost require daemon-side tracking (TODO: add to daemon and /health response).
-// All three live together in the stat grid so the row structure is stable even when
-// the values are "—" — Valerie sees the shape of the data from day one.
-function useSessionStats(activeAgentId) {
-  const [stats, setStats] = useState({ messages: null, tokensToday: null, costToday: null });
+// ── Well stats ───────────────────────────────────────────────────────────────
+// Aggregates stat-grid data from /api/sessions (active count, tokens today,
+// cost today) and /api/chat/history (message count for this session).
+// Polls /api/sessions every 60s — cheap enough, valuable enough.
+function useWellStats(activeAgentId) {
+  const [stats, setStats] = useState({
+    messages: null,
+    tokensToday: null,
+    costToday: null,
+    activeSessions: null,
+  });
+
+  // Chat message count — per-session, refetch when agent switches
   useEffect(() => {
     const sessionId = sessionStorage.getItem("well-session-id") || "default";
     fetch(`/api/chat/history?sessionId=${encodeURIComponent(sessionId)}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
-        // history is an array of {role, content} entries; count both sides
         const msgs = Array.isArray(data.history) ? data.history.length : 0;
         setStats(s => ({ ...s, messages: msgs }));
       })
       .catch(() => {});
-  }, [activeAgentId]); // re-fetch when agent switches (different session context)
+  }, [activeAgentId]);
+
+  // Sessions aggregate — active count, tokens today, cost today
+  const pollSessions = useCallback(async () => {
+    try {
+      const r = await fetch("/api/sessions");
+      if (!r.ok) return;
+      const data = await r.json();
+      if (!data.ok || !Array.isArray(data.sessions)) return;
+
+      const now = Date.now();
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayMs = todayStart.getTime();
+
+      // Active = updated in last 30 minutes
+      const activeSessions = data.sessions.filter(
+        s => (now - (s.updatedAt || 0)) < 30 * 60 * 1000
+      ).length;
+
+      // Tokens + cost: only sessions touched today
+      let tokensToday = 0;
+      let costToday = 0;
+      for (const s of data.sessions) {
+        if ((s.updatedAt || 0) >= todayMs) {
+          tokensToday += s.totalTokens || 0;
+          costToday   += s.costEst     || 0;
+        }
+      }
+
+      setStats(s => ({
+        ...s,
+        activeSessions,
+        tokensToday: tokensToday || null,
+        costToday:   costToday   || null,
+      }));
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    pollSessions();
+    const t = setInterval(pollSessions, 60_000);
+    return () => clearInterval(t);
+  }, [pollSessions]);
+
   return stats;
+}
+
+// ── Cron jobs (Skuld's schedule) ──────────────────────────────────────────────
+// Fetches /api/cron once and re-polls every 5 minutes.
+// Jobs are sorted by daemon: enabled first, then alphabetical.
+function useCronJobs() {
+  const [jobs,    setJobs]    = useState(null);
+  const [cronErr, setCronErr] = useState(null);
+
+  const poll = useCallback(async () => {
+    try {
+      const r = await fetch("/api/cron");
+      const d = await r.json();
+      if (d.ok && Array.isArray(d.jobs)) {
+        setJobs(d.jobs);
+        setCronErr(null);
+      } else {
+        setCronErr(d.error || "Unknown error");
+      }
+    } catch (e) {
+      setCronErr(e.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    poll();
+    const t = setInterval(poll, 5 * 60_000);
+    return () => clearInterval(t);
+  }, [poll]);
+
+  return { jobs, cronErr };
+}
+
+// ── SkuldSchedule ─────────────────────────────────────────────────────────────
+// The Norn of the future holds what is yet to come.
+// Renders cron jobs as a disclosure list — VoiceOver-friendly, no table.
+function SkuldSchedule({ jobs, cronErr }) {
+  if (cronErr) {
+    return (
+      <details className="skuld-schedule">
+        <summary>Skuld's schedule</summary>
+        <p className="muted" style={{ marginTop: "0.5rem" }}>
+          Could not load schedule: {cronErr}
+        </p>
+      </details>
+    );
+  }
+
+  if (!jobs) {
+    return (
+      <details className="skuld-schedule">
+        <summary>Skuld's schedule —</summary>
+        <p className="skuld-empty">Reading the threads…</p>
+      </details>
+    );
+  }
+
+  if (jobs.length === 0) {
+    return (
+      <details className="skuld-schedule">
+        <summary>Skuld's schedule —</summary>
+        <p className="skuld-empty">No jobs scheduled. The loom is still.</p>
+      </details>
+    );
+  }
+
+  // Split enabled vs disabled for cleaner VoiceOver experience
+  const enabled  = jobs.filter(j => j.enabled);
+  const disabled = jobs.filter(j => !j.enabled);
+
+  function statusLabel(job) {
+    const s = job.lastRunStatus;
+    if (!s) return "never run";
+    if (s === "ok") return "✓ ok";
+    if (s === "error") return "✗ error";
+    return s;
+  }
+
+  function nextLabel(job) {
+    if (!job.nextRunAtMs) return null;
+    const diff = job.nextRunAtMs - Date.now();
+    if (diff < 0) return "overdue";
+    const h = Math.floor(diff / 3_600_000);
+    const m = Math.floor((diff % 3_600_000) / 60_000);
+    if (h > 23) return `in ${Math.floor(h / 24)}d ${h % 24}h`;
+    if (h > 0)  return `in ${h}h ${m}m`;
+    return `in ${m}m`;
+  }
+
+  function renderJob(job) {
+    const next = nextLabel(job);
+    return (
+      <li key={job.id} className="skuld-job">
+        <dl className="skuld-job-dl">
+          <dt className="sr-only">Job</dt>
+          <dd className="skuld-job-name">{job.name}</dd>
+          <dt>Schedule</dt>
+          <dd className="muted">{job.scheduleExpr || "—"}</dd>
+          {next && (<><dt>Next run</dt><dd className="muted">{next}</dd></>)}
+          <dt>Last status</dt>
+          <dd className={`skuld-status skuld-status-${job.lastRunStatus || "none"}`}>
+            {statusLabel(job)}
+          </dd>
+        </dl>
+      </li>
+    );
+  }
+
+  return (
+    <details className="skuld-schedule">
+      <summary>Skuld's schedule — {enabled.length} active</summary>
+      <ul className="skuld-job-list" role="list" aria-label="Scheduled jobs">
+        {enabled.map(renderJob)}
+        {disabled.length > 0 && (
+          <li>
+            <details className="skuld-disabled">
+              <summary className="muted">{disabled.length} disabled job{disabled.length !== 1 ? "s" : ""}</summary>
+              <ul role="list">
+                {disabled.map(j => (
+                  <li key={j.id} className="skuld-job skuld-job-disabled">
+                    <span className="muted">{j.name}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </li>
+        )}
+      </ul>
+    </details>
+  );
 }
 
 // ── Agent loading ─────────────────────────────────────────────────────────────
@@ -101,18 +280,15 @@ function StatusIndicator({ health }) {
 
 // ── TheWell (home section with gateway stats + chat) ─────────────────────────
 function TheWell({ health, agents, activeAgentId, onAgentChange }) {
-  // Pull the Well's description from the panel registry rather than hardcoding it here.
-  // This way if the description is ever updated in panelRegistry.js, it's reflected everywhere.
-  const wellPanel = panelRegistry.get("well");
-  const uptime    = health?.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
-  const version   = health?.phase || "—";
-  // hb and sessions are placeholders until dedicated endpoints exist.
-  // Kept as "—" rather than removing the JSX rows so the stat grid stays consistent.
-  const hb       = "—"; // TODO Phase 2: pull last heartbeat time from /health or /api/cron
-  const sessions = "—"; // TODO Phase 2: pull active session count from gateway
+  const uptime  = health?.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
+  const version = health?.phase || "—";
+  const hb      = "—"; // heartbeat time — wired when gateway exposes it
 
-  // Usage stats — messages live from history; tokens/cost need daemon tracking
-  const { messages, tokensToday, costToday } = useSessionStats(activeAgentId);
+  // Phase 2: live stats from /api/sessions + /api/chat/history
+  const { messages, tokensToday, costToday, activeSessions } = useWellStats(activeAgentId);
+
+  // Phase 3: cron jobs for Skuld's schedule
+  const { jobs: cronJobs, cronErr } = useCronJobs();
 
   return (
     <div className="section-content">
@@ -167,12 +343,12 @@ function TheWell({ health, agents, activeAgentId, onAgentChange }) {
         </div>
 
         <dl className="stat-grid">
-          <dt>Uptime</dt>          <dd>{uptime}</dd>
+          <dt>Uptime</dt>          <dd><output>{uptime}</output></dd>
           <dt>Last heartbeat</dt>  <dd>{hb}</dd>
-          <dt>Active sessions</dt> <dd>{sessions}</dd>
-          <dt>Messages total</dt>  <dd>{messages != null ? messages.toLocaleString() : "—"}</dd>
-          <dt>Tokens today</dt>    <dd>{tokensToday != null ? tokensToday.toLocaleString() : "—"}</dd>
-          <dt>Cost today</dt>      <dd>{costToday != null ? `$${costToday.toFixed(2)}` : "—"}</dd>
+          <dt>Active sessions</dt> <dd><output>{activeSessions != null ? activeSessions : "—"}</output></dd>
+          <dt>Messages total</dt>  <dd><output>{messages != null ? messages.toLocaleString() : "—"}</output></dd>
+          <dt>Tokens today</dt>    <dd><output>{tokensToday != null ? tokensToday.toLocaleString() : "—"}</output></dd>
+          <dt>Cost today</dt>      <dd><output>{costToday != null ? `~$${costToday.toFixed(2)}` : "—"}</output></dd>
           <dt>Security</dt>        <dd>All clear — the Hearth burns steady</dd>
         </dl>
       </div>
@@ -183,18 +359,14 @@ function TheWell({ health, agents, activeAgentId, onAgentChange }) {
       <details className="skuld-schedule">
         <summary>Gateway runtime details</summary>
         <dl className="stat-grid" style={{marginTop: "0.5rem"}}>
-          <dt>Phase</dt>     <dd>{version}</dd>
+          <dt>Phase</dt>      <dd>{version}</dd>
           <dt>Gateway URL</dt><dd>{health?.gateway_url ?? "—"}</dd>
-          <dt>Sessions</dt>  <dd>{sessions}</dd>
+          <dt>Sessions</dt>   <dd><output>{activeSessions != null ? activeSessions : "—"}</output></dd>
         </dl>
       </details>
 
-      {/* Skuld's schedule — the Norn of the future holds what is yet to come.
-          Shows HEARTBEAT.md tasks; empty until tasks are configured. */}
-      <details className="skuld-schedule">
-        <summary>Skuld's schedule —</summary>
-        <p className="skuld-empty">No heartbeat tasks configured. Edit HEARTBEAT.md to add them.</p>
-      </details>
+      {/* Skuld's schedule — Phase 3: live cron jobs from /api/cron */}
+      <SkuldSchedule jobs={cronJobs} cronErr={cronErr} />
 
       {/* Agent selector */}
       <div className="agent-row">

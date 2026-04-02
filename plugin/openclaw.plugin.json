@@ -1,8 +1,8 @@
 {
-  "id": "voice-interface",
-  "name": "Urðarbrunnr Voice Interface",
+  "id": "mythscape-os",
+  "name": "Mythscape OS",
   "version": "1.0.0",
-  "description": "Manages the Urðarbrunnr voice daemon lifecycle — wake-word detection, ElevenLabs middleware, Web UI.",
+  "description": "Manages the Mythscape OS voice daemon lifecycle — wake-word detection, ElevenLabs middleware, Web UI.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
