@@ -156,7 +156,7 @@ function spawnDaemon(
 
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "/usr/bin:/bin:/usr/sbin:/sbin",
-    HOME: "/var/empty",
+    HOME: cfg.daemonUser ? "/var/empty" : (process.env.HOME ?? "/Users/threadweaver"),
     OPENCLAW_VOICE_PORT: String(cfg.port),
     OPENCLAW_VOICE_MW_PORT: String(cfg.mwPort),
     OPENCLAW_GATEWAY_URL: gatewayUrl,
@@ -169,14 +169,23 @@ function spawnDaemon(
   const elevenKey = (api.config as any)?.env?.ELEVENLABS_API_KEY;
   if (elevenKey) env.ELEVENLABS_API_KEY = elevenKey;
 
-  // spawn: sudo -u _mythscape-os <python> <daemon.py> [args]
-  const child = spawn(
-    "sudo",
-    ["-n", "-u", cfg.daemonUser, cfg.pythonBin, ...args],
-    { env, stdio: ["ignore", "pipe", "pipe"], detached: false }
-  );
-
-  log(api, "info", `Spawned daemon PID ${child.pid ?? "?"} as ${cfg.daemonUser}`);
+  // If daemonUser is set, use sudo -u; otherwise spawn directly as the current user (threadweaver)
+  let child: ChildProcess;
+  if (cfg.daemonUser) {
+    child = spawn(
+      "sudo",
+      ["-n", "-u", cfg.daemonUser, cfg.pythonBin, ...args],
+      { env, stdio: ["ignore", "pipe", "pipe"], detached: false }
+    );
+    log(api, "info", `Spawned daemon PID ${child.pid ?? "?"} as ${cfg.daemonUser}`);
+  } else {
+    child = spawn(
+      cfg.pythonBin,
+      args,
+      { env, stdio: ["ignore", "pipe", "pipe"], detached: false }
+    );
+    log(api, "info", `Spawned daemon PID ${child.pid ?? "?"} as current user`);
+  }
 
   child.stdout?.on("data", (d: Buffer) => {
     process.stdout.write(`[mythscape-os] ${d}`);

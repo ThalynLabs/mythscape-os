@@ -50,8 +50,17 @@ log = logging.getLogger("well-daemon")
 DAEMON_DIR        = pathlib.Path("/opt/mythscape-os")
 ATTACH_DIR        = pathlib.Path("/tmp/mythscape-os-attachments")
 MAX_ATTACH_B64    = 20 * 1024 * 1024  # 20 MB base64 limit (~15 MB image)
-# Serve UI from workspace so updates don't require sudo deploy
-# Falls back to /opt/mythscape-os/ui if workspace isn't readable
+# UI source of truth: ~/GitHub/mythscape-os/ui-src/
+# Build output:       ~/GitHub/mythscape-os/ui/  (npm run build in ui-src/)
+# Symlink:            ~/.openclaw/workspace/mythscape-os/ui -> ~/GitHub/mythscape-os/ui/
+#
+# The daemon resolves in order:
+#   1. Workspace path (symlink → GitHub build output) — normal operation
+#   2. /opt/mythscape-os/ui — emergency fallback if workspace is missing
+#
+# Set the symlink once:
+#   ln -s ~/GitHub/mythscape-os/ui ~/.openclaw/workspace/mythscape-os/ui
+# After that: edit → npm run build → reload. No deploy step, no sudo, no copying.
 _WORKSPACE_UI     = pathlib.Path("/Users/threadweaver/.openclaw/workspace/mythscape-os/ui")
 UI_DIR            = _WORKSPACE_UI if _WORKSPACE_UI.exists() else DAEMON_DIR / "ui"
 SETTINGS_FILE     = DAEMON_DIR / "settings.json"
@@ -197,17 +206,33 @@ def get_gateway_token() -> str | None:
 
 
 def get_known_agents() -> list[dict]:
-    settings = load_settings()
-    agent_settings = settings.get("agents", DEFAULT_AGENTS)
+    # Source of truth: openclaw.json agents.list[] — the full Court roster.
+    # Raises RuntimeError if the list cannot be read or is empty so callers
+    # can surface a real error rather than silently degrading to stale data.
+    try:
+        cfg = read_openclaw_cfg()
+        agents_list = cfg.get("agents", {}).get("list", [])
+    except Exception as e:
+        raise RuntimeError(f"Could not read openclaw.json: {e}") from e
+
     result = []
-    for agent_id, cfg in agent_settings.items():
+    for agent in agents_list:
+        agent_id = agent.get("id")
+        if not agent_id:
+            continue
+        identity = agent.get("identity", {})
         result.append({
             "id": agent_id,
-            "agentId": cfg.get("agentId", "main"),
-            "displayName": cfg.get("displayName", agent_id),
-            "wakeWord": cfg.get("wakeWord", {"mode": "agent_name", "custom": ""}),
-            "voiceId": cfg.get("voiceId", ""),
+            "agentId": agent_id,
+            "displayName": identity.get("name", agent_id),
+            "emoji": identity.get("emoji", ""),
+            "wakeWord": {"mode": "agent_name", "custom": ""},
+            "voiceId": "",
         })
+
+    if not result:
+        raise RuntimeError("agents.list[] is empty or missing in openclaw.json")
+
     return result
 
 
@@ -745,13 +770,8 @@ async def get_sessions():
     import time
     try:
         gateway_url = _state["config"].get("gateway_url", DEFAULT_GATEWAY_URL)
-        # Read token directly from openclaw.json — _state doesn't cache it
-        token = ""
-        try:
-            cfg   = json.loads(OPENCLAW_CFG_PATH.read_text())
-            token = cfg.get("gateway", {}).get("auth", {}).get("token", "")
-        except Exception:
-            pass
+        # Use get_gateway_token() which handles token file, keychain, and env var
+        token = get_gateway_token() or ""
 
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         payload = {
@@ -1237,7 +1257,11 @@ async def get_file(name: str):
 
 @app.get("/api/agents")
 async def get_agents():
-    agents = get_known_agents()
+    try:
+        agents = get_known_agents()
+    except RuntimeError as e:
+        log.error("get_agents: %s", e)
+        return JSONResponse(status_code=503, content={"ok": False, "error": str(e)})
     settings = load_settings()
     for agent in agents:
         aid = agent["id"]
@@ -1346,6 +1370,82 @@ async def get_roster():
         return {"ok": False, "error": "Roster not found"}
     try:
         return {"ok": True, "content": path.read_text(), "format": "markdown"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Moirai endpoints — pipeline visibility (The Fates)
+# ---------------------------------------------------------------------------
+# The Moirai panel surfaces three data streams:
+#   Clotho  — delivery queue failures (messages that could not be sent)
+#   Lachesis — subagent run history (dispatched tasks, outcomes)
+# Atropos (exec approvals / pending decisions) is served by /api/security.
+
+_DELIVERY_FAILED_DIR = pathlib.Path("/Users/threadweaver/.openclaw/delivery-queue/failed")
+_SUBAGENTS_RUNS_PATH = pathlib.Path("/Users/threadweaver/.openclaw/subagents/runs.json")
+
+
+@app.get("/api/moirai/delivery-failed")
+async def get_delivery_failed():
+    """Return failed delivery queue items for Clotho's view in The Moirai."""
+    if not _DELIVERY_FAILED_DIR.exists():
+        return {"ok": True, "items": []}
+    try:
+        items = []
+        for p in sorted(_DELIVERY_FAILED_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)[:50]:
+            try:
+                data = json.loads(p.read_text())
+                payloads = data.get("payloads", [])
+                text_preview = ""
+                for pl in payloads:
+                    t = pl.get("text") or pl.get("content") or ""
+                    if t:
+                        text_preview = t[:120]
+                        break
+                items.append({
+                    "id": data.get("id", p.stem),
+                    "channel": data.get("channel", "unknown"),
+                    "to": data.get("to", ""),
+                    "enqueuedAt": data.get("enqueuedAt"),
+                    "retryCount": data.get("retryCount", 0),
+                    "lastError": data.get("lastError", ""),
+                    "textPreview": text_preview,
+                })
+            except Exception:
+                pass
+        return {"ok": True, "items": items}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/moirai/subagent-runs")
+async def get_subagent_runs():
+    """Return subagent run history for Lachesis's view in The Moirai."""
+    if not _SUBAGENTS_RUNS_PATH.exists():
+        return {"ok": True, "runs": []}
+    try:
+        data = json.loads(_SUBAGENTS_RUNS_PATH.read_text())
+        raw = data.get("runs", {})
+        if isinstance(raw, dict):
+            raw = list(raw.values())
+        runs = []
+        for r in raw:
+            outcome = r.get("outcome", {})
+            status = outcome.get("status", "unknown") if isinstance(outcome, dict) else str(outcome)
+            runs.append({
+                "runId": r.get("runId", ""),
+                "label": r.get("label", ""),
+                "agent": r.get("childSessionKey", "").split(":")[1] if ":" in r.get("childSessionKey", "") else "",
+                "task": (r.get("task") or "")[:200],
+                "status": status,
+                "createdAt": r.get("createdAt"),
+                "endedAt": r.get("endedAt"),
+                "model": r.get("model", ""),
+                "spawnMode": r.get("spawnMode", ""),
+            })
+        runs.sort(key=lambda r: r.get("createdAt") or 0, reverse=True)
+        return {"ok": True, "runs": runs[:50]}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

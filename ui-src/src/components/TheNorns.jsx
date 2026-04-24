@@ -1273,18 +1273,357 @@ function Skuld({ health }) {
   );
 }
 
+// ── ModelTrustConfig: Model & Trust Configuration ────────────────────────────
+//
+// Controls which LLM tiers (T0–T3) are active and which models each brain
+// service uses. The critical goal: enable T0 (local Ollama) for lighter
+// tasks like emotion scoring and semantic clustering to cut API token cost.
+// Data lives in the brain_config table under keys "llm_tier_config" and
+// "service_tier_config". Proxied through the daemon at /api/brain/brain-config.
+//
+// Named "Wyrd" — the overarching fate that the three Norns weave together.
+// It's the model layer that shapes how all memory and cognition flows.
+
+const DEFAULT_TIER_CONFIG = {
+  t0: {
+    provider: "ollama",
+    model: "gemma3:27b",
+    fallbackModel: "qwen3:8b",
+    enabled: false,
+    role: "local bulk lane",
+  },
+  t1: {
+    provider: "anthropic",
+    model: "claude-haiku-4-5-20251001",
+    fallbackProvider: "openrouter",
+    fallbackModel: "meta-llama/llama-3.3-70b-instruct",
+    enabled: true,
+    role: "cheap remote lane",
+    dailyRequestCap: 200,
+  },
+  t2: {
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    enabled: true,
+    role: "trusted commit lane",
+  },
+  t3: {
+    provider: "anthropic",
+    model: "claude-opus-4-6",
+    enabled: true,
+    role: "architect lane",
+  },
+};
+
+// Per-service default tier assignments. Lower tiers cost less.
+// emotionTaggerScoring and semanticClustering are good T0 candidates.
+const DEFAULT_SERVICE_TIERS = {
+  anchorTagger:            "t2",
+  emotionTaggerScoring:    "t1",
+  emotionTaggerClass:      "t2",
+  semanticClustering:      "t1",
+  reconsolidation:         "t2",
+  sleepConsolidation:      "t2",
+  spontaneousRetrieval:    "t2",
+  reasoningChainExtractor: "t1",
+};
+
+const TIER_META = {
+  t0: {
+    label:    "T0 · Local",
+    tagLabel: "T0",
+    desc:     "Ollama on-device — zero API tokens. Bulk proposals, lightweight tagging.",
+  },
+  t1: {
+    label:    "T1 · Fast Remote",
+    tagLabel: "T1",
+    desc:     "Cheap cloud model. Proposals and scoring reviewed before they commit.",
+  },
+  t2: {
+    label:    "T2 · Trusted",
+    tagLabel: "T2",
+    desc:     "Sonnet — trusted commit lane. Final anchor wording, classification.",
+  },
+  t3: {
+    label:    "T3 · Architect",
+    tagLabel: "T3",
+    desc:     "Opus — high-stakes reasoning and design decisions.",
+  },
+};
+
+const SERVICE_META = {
+  anchorTagger:            { label: "Anchor Tagger",            desc: "Words permanent anchors from skein entries." },
+  emotionTaggerScoring:    { label: "Emotion Tagger (scoring)", desc: "Assigns numeric emotion scores. Good T0 candidate." },
+  emotionTaggerClass:      { label: "Emotion Tagger (class)",   desc: "Classifies dominant emotion type." },
+  semanticClustering:      { label: "Semantic Clustering",      desc: "Groups related memories into clusters. Good T0 candidate." },
+  reconsolidation:         { label: "Reconsolidation",          desc: "Rewrites anchors when new context supersedes them." },
+  sleepConsolidation:      { label: "Sleep Consolidation",      desc: "Batch consolidation during quiet periods." },
+  spontaneousRetrieval:    { label: "Spontaneous Retrieval",    desc: "Background surfacing of relevant memories." },
+  reasoningChainExtractor: { label: "Reasoning Chains",         desc: "Extracts assumption→failure→revision chains." },
+};
+
+const PROVIDERS = ["anthropic", "openai", "ollama", "openrouter"];
+
+function ModelTrustConfig() {
+  const [editTiers,    setEditTiers]    = useState(null);
+  const [editServices, setEditServices] = useState(null);
+  const [loading,  setLoading]  = useState(true);
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState(null);
+  const [status,   setStatus]   = useState(null);
+
+  // Load both config keys from the brain, falling back to in-code defaults if
+  // the Brain doesn't have them stored yet. allSettled so one miss doesn't block.
+  const loadConfig = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const [tierRes, svcRes] = await Promise.allSettled([
+      brainFetch("/brain-config", { params: { key: "llm_tier_config" } }),
+      brainFetch("/brain-config", { params: { key: "service_tier_config" } }),
+    ]);
+    const tc = tierRes.status === "fulfilled" && tierRes.value?.value
+      ? tierRes.value.value
+      : JSON.parse(JSON.stringify(DEFAULT_TIER_CONFIG));
+    const sc = svcRes.status === "fulfilled" && svcRes.value?.value
+      ? svcRes.value.value
+      : JSON.parse(JSON.stringify(DEFAULT_SERVICE_TIERS));
+    setEditTiers(JSON.parse(JSON.stringify(tc)));
+    setEditServices(JSON.parse(JSON.stringify(sc)));
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadConfig(); }, [loadConfig]);
+
+  const updateTierField = (tier, field, value) => {
+    setEditTiers(prev => ({ ...prev, [tier]: { ...prev[tier], [field]: value } }));
+  };
+
+  const saveTiers = async () => {
+    setSaving(true); setError(null); setStatus(null);
+    try {
+      await brainFetch("/brain-config", {
+        method: "PUT",
+        body: { key: "llm_tier_config", value: editTiers },
+      });
+      setStatus("Tier configuration saved.");
+    } catch (e) {
+      setError(`Save failed: ${e.message}`);
+    }
+    setSaving(false);
+  };
+
+  const saveServices = async () => {
+    setSaving(true); setError(null); setStatus(null);
+    try {
+      await brainFetch("/brain-config", {
+        method: "PUT",
+        body: { key: "service_tier_config", value: editServices },
+      });
+      setStatus("Service assignment saved.");
+    } catch (e) {
+      setError(`Save failed: ${e.message}`);
+    }
+    setSaving(false);
+  };
+
+  return (
+    <details className="norn-pane">
+      <summary className="norn-heading">
+        <span className="norn-name">Wyrd</span>
+        <span className="norn-role">Model &amp; Trust Configuration · LLM tiers</span>
+      </summary>
+
+      <div className="norn-body">
+        <p className="norn-desc">
+          Four trust tiers route brain work to the right model. T0 (local Ollama) costs zero
+          API tokens — enabling it for lighter services like emotion scoring and semantic
+          clustering directly cuts API spend without affecting anchor quality.
+        </p>
+
+        {error  && <p className="rune-error" role="alert">{error}</p>}
+        {status && <p className="rune-ok"    role="status" aria-live="polite">{status}</p>}
+
+        {loading ? (
+          <p className="rune-loading">Loading tier configuration…</p>
+        ) : (
+          <>
+            {/* ── Trust tier cards ──────────────────────────────────────── */}
+            <section aria-label="Trust tier configuration">
+              <div className="wyrd-section-header">
+                <h3>Trust tiers</h3>
+                <button className="btn-refresh" onClick={saveTiers} disabled={saving}>
+                  {saving ? "Saving…" : "Save tiers"}
+                </button>
+              </div>
+
+              <div className="model-tier-grid">
+                {["t0", "t1", "t2", "t3"].map(tier => {
+                  const meta = TIER_META[tier];
+                  const cfg  = editTiers?.[tier] ?? {};
+                  return (
+                    <fieldset
+                      key={tier}
+                      className={`model-tier-card${cfg.enabled ? " tier-enabled" : " tier-disabled"}`}
+                    >
+                      <legend>
+                        <span className="tier-badge">{meta.tagLabel}</span>
+                        {" "}{meta.label.split("·")[1]?.trim()}
+                      </legend>
+
+                      <p className="tier-desc">{meta.desc}</p>
+
+                      {/* Enabled toggle */}
+                      <label className="tier-toggle">
+                        <input
+                          type="checkbox"
+                          checked={!!cfg.enabled}
+                          onChange={e => updateTierField(tier, "enabled", e.target.checked)}
+                        />
+                        {" "}Enabled
+                      </label>
+
+                      {/* Provider */}
+                      <div className="tier-field">
+                        <label htmlFor={`${tier}-provider`}>Provider</label>
+                        <select
+                          id={`${tier}-provider`}
+                          value={cfg.provider || "anthropic"}
+                          onChange={e => updateTierField(tier, "provider", e.target.value)}
+                        >
+                          {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      </div>
+
+                      {/* Primary model */}
+                      <div className="tier-field">
+                        <label htmlFor={`${tier}-model`}>Model</label>
+                        <input
+                          id={`${tier}-model`}
+                          type="text"
+                          value={cfg.model || ""}
+                          onChange={e => updateTierField(tier, "model", e.target.value)}
+                          className="norns-input"
+                          placeholder="model name"
+                        />
+                      </div>
+
+                      {/* Fallback — T0 and T1 only */}
+                      {(tier === "t0" || tier === "t1") && (
+                        <>
+                          <div className="tier-field">
+                            <label htmlFor={`${tier}-fb-provider`}>Fallback provider</label>
+                            <select
+                              id={`${tier}-fb-provider`}
+                              value={cfg.fallbackProvider || ""}
+                              onChange={e => updateTierField(tier, "fallbackProvider", e.target.value)}
+                            >
+                              <option value="">— none —</option>
+                              {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                          </div>
+                          <div className="tier-field">
+                            <label htmlFor={`${tier}-fb-model`}>Fallback model</label>
+                            <input
+                              id={`${tier}-fb-model`}
+                              type="text"
+                              value={cfg.fallbackModel || ""}
+                              onChange={e => updateTierField(tier, "fallbackModel", e.target.value)}
+                              className="norns-input"
+                              placeholder="fallback model name"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {/* Daily cap — T1 only */}
+                      {tier === "t1" && (
+                        <div className="tier-field">
+                          <label htmlFor="t1-daily-cap">Daily request cap</label>
+                          <input
+                            id="t1-daily-cap"
+                            type="number"
+                            min={0}
+                            value={cfg.dailyRequestCap ?? 200}
+                            onChange={e => updateTierField("t1", "dailyRequestCap", Number(e.target.value))}
+                            className="norns-input"
+                            style={{ width: "6rem" }}
+                          />
+                        </div>
+                      )}
+                    </fieldset>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* ── Service tier assignment table ─────────────────────────── */}
+            <section aria-label="Service tier assignment" style={{ marginTop: "1.5rem" }}>
+              <div className="wyrd-section-header">
+                <h3>Service assignments</h3>
+                <button className="btn-refresh" onClick={saveServices} disabled={saving}>
+                  {saving ? "Saving…" : "Save assignments"}
+                </button>
+              </div>
+              <p className="norn-desc" style={{ marginTop: 0, marginBottom: "0.75rem" }}>
+                Map each brain service to a tier. Lighter services marked "Good T0 candidate"
+                can move to local Ollama with no quality loss.
+              </p>
+
+              <table className="norns-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Service</th>
+                    <th scope="col">Purpose</th>
+                    <th scope="col">Tier</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(SERVICE_META).map(([key, meta]) => (
+                    <tr key={key}>
+                      <td className="service-name">{meta.label}</td>
+                      <td className="service-desc">{meta.desc}</td>
+                      <td>
+                        <label htmlFor={`svc-${key}`} className="sr-only">
+                          Tier for {meta.label}
+                        </label>
+                        <select
+                          id={`svc-${key}`}
+                          value={editServices?.[key] ?? "t2"}
+                          onChange={e => setEditServices(prev => ({ ...prev, [key]: e.target.value }))}
+                        >
+                          <option value="t0">T0 · Local</option>
+                          <option value="t1">T1 · Fast</option>
+                          <option value="t2">T2 · Trusted</option>
+                          <option value="t3">T3 · Architect</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          </>
+        )}
+      </div>
+    </details>
+  );
+}
+
 // ── TheNorns (root component) ───────────────────────────────────────────────
 
 export default function TheNorns({ health, agents }) {
   return (
     <div className="section-content norns-section">
       <p className="section-desc">
-        Three sisters tend the World Tree. Each holds a different strand of time.
+        Three Norns tend the World Tree, and Wyrd oversees the loom itself.
+        Urd holds what has passed, Verdandi what is now, Skuld what is yet to be.
+        Wyrd controls which models weave the threads.
       </p>
 
       <Urd />
       <Verdandi health={health} agents={agents} />
       <Skuld health={health} />
+      <ModelTrustConfig />
       <FixturePanel />
       <details className="norn-pane">
         <summary className="norn-heading">

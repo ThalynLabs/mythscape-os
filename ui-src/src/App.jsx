@@ -18,6 +18,7 @@ import TheVoice       from "./components/TheVoice.jsx";
 import TheNodes       from "./components/TheNodes.jsx";
 import TheSkein       from "./components/TheSkein.jsx";
 import RoomsPanel     from "./components/RoomsPanel.jsx";
+import TheMoirai      from "./components/TheMoirai.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
 import { BrainPhaseHeaderIndicator } from "./components/BrainPhaseControl.jsx";
 import { panelRegistry } from "./panelRegistry.js";
@@ -74,23 +75,18 @@ function useWellStats(activeAgentId) {
       if (!data.ok || !Array.isArray(data.sessions)) return;
 
       const now = Date.now();
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      const todayMs = todayStart.getTime();
 
       // Active = updated in last 30 minutes
       const activeSessions = data.sessions.filter(
         s => (now - (s.updatedAt || 0)) < 30 * 60 * 1000
       ).length;
 
-      // Tokens + cost: only sessions touched today
+      // Tokens + cost: use daemon-computed daily deltas (tokensToday / costToday per session)
       let tokensToday = 0;
       let costToday = 0;
       for (const s of data.sessions) {
-        if ((s.updatedAt || 0) >= todayMs) {
-          tokensToday += s.totalTokens || 0;
-          costToday   += s.costEst     || 0;
-        }
+        tokensToday += s.tokensToday || 0;
+        costToday   += s.costToday   || 0;
       }
 
       setStats(s => ({
@@ -278,16 +274,19 @@ function StatusIndicator({ health }) {
   );
 }
 
-// ── TheWell (home section with gateway stats + chat) ─────────────────────────
-function TheWell({ health, agents, activeAgentId, onAgentChange }) {
+// ── TheWell (metrics dashboard — no chat) ────────────────────────────────────
+// The Well is the instrument panel: gateway health, live cost/token counters,
+// Skuld's cron schedule, and runtime details. Chat lives in The Court.
+function TheWell({ health }) {
   const uptime  = health?.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const version = health?.phase || "—";
   const hb      = "—"; // heartbeat time — wired when gateway exposes it
 
-  // Phase 2: live stats from /api/sessions + /api/chat/history
-  const { messages, tokensToday, costToday, activeSessions } = useWellStats(activeAgentId);
+  // Live stats from /api/sessions + /api/chat/history.
+  // activeAgentId not needed here — message count is session-level, not agent-level.
+  const { messages, tokensToday, costToday, activeSessions } = useWellStats(null);
 
-  // Phase 3: cron jobs for Skuld's schedule
+  // Cron jobs for Skuld's schedule
   const { jobs: cronJobs, cronErr } = useCronJobs();
 
   return (
@@ -368,11 +367,30 @@ function TheWell({ health, agents, activeAgentId, onAgentChange }) {
       {/* Skuld's schedule — Phase 3: live cron jobs from /api/cron */}
       <SkuldSchedule jobs={cronJobs} cronErr={cronErr} />
 
-      {/* Agent selector */}
+    </div>
+  );
+}
+
+function formatUptime(s) {
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// ── TheCourt (agent selector + chat + roster) ─────────────────────────────────
+// The Court is the primary conversation surface — where you speak with agents.
+// Agent selector at the top, the full streaming Chat interface below that,
+// then the RoomsPanel roster for direct per-agent messaging and status.
+// Chat was moved here from The Well so The Well can stay a clean metrics panel.
+function TheCourt({ agents, activeAgentId, onAgentChange }) {
+  return (
+    <div className="section-content">
+      {/* Agent selector — choose who you're speaking with */}
       <div className="agent-row">
-        <label htmlFor="agent-select" className="agent-label">Speaking with:</label>
+        <label htmlFor="court-agent-select" className="agent-label">Speaking with:</label>
         <select
-          id="agent-select"
+          id="court-agent-select"
           value={activeAgentId}
           onChange={e => onAgentChange(e.target.value)}
           aria-label="Select agent to talk to"
@@ -383,17 +401,13 @@ function TheWell({ health, agents, activeAgentId, onAgentChange }) {
         </select>
       </div>
 
-      {/* Chat — the primary surface */}
+      {/* Chat — full streaming conversation surface */}
       <Chat agents={agents} activeAgentId={activeAgentId} onAgentChange={onAgentChange} />
+
+      {/* RoomsPanel — agent roster, direct wake-and-message, court hierarchy */}
+      <RoomsPanel agents={agents} />
     </div>
   );
-}
-
-function formatUptime(s) {
-  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
 }
 
 // ── Placeholder sections ──────────────────────────────────────────────────────
@@ -581,7 +595,7 @@ export default function App() {
   const renderSection = () => {
     switch (activeSection) {
       case "well":
-        return <TheWell health={health} agents={agents} activeAgentId={activeAgentId} onAgentChange={setActiveAgentId} />;
+        return <TheWell health={health} />;
       case "norns":
         // Pass health + agents down so TheNorns shares the same polling loop as The Well —
         // no duplicate /health fetches, no separate timers.
@@ -597,7 +611,7 @@ export default function App() {
       case "threads":
         return <TheThreads />;
       case "court":
-        return <RoomsPanel agents={[]} />;
+        return <TheCourt agents={agents} activeAgentId={activeAgentId} onAgentChange={setActiveAgentId} />;
       case "roots":
         return <TheRoots />;
       case "branches":
@@ -606,6 +620,8 @@ export default function App() {
         return <TheVoice />;
       case "nodes":
         return <TheNodes />;
+      case "moirai":
+        return <TheMoirai />;
       default:
         return <PlaceholderSection panel={currentPanel} />;
     }

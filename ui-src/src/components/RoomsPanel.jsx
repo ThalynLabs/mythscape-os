@@ -51,6 +51,7 @@ function useCourtRoster() {
 
 export default function RoomsPanel({ agents }) {
   const [agentList, setAgentList] = useState([]);
+  const [agentError, setAgentError] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [messages, setMessages] = useState({});  // agentId → [{role, content, ts}]
   const [inputText, setInputText] = useState("");
@@ -65,11 +66,16 @@ export default function RoomsPanel({ agents }) {
   // Fetch agents from daemon
   useEffect(() => {
     fetch("/api/agents")
-      .then(r => r.ok ? r.json() : null)
+      .then(r => r.json())
       .then(data => {
-        if (data?.agents?.length) setAgentList(data.agents);
+        if (data?.ok && data.agents?.length) {
+          setAgentList(data.agents);
+          setAgentError(null);
+        } else {
+          setAgentError(data?.error || "Could not load agents from daemon");
+        }
       })
-      .catch(() => {});
+      .catch(e => setAgentError(`Could not reach daemon: ${e.message}`));
   }, []);
 
   // Focus input when expanding an agent
@@ -253,7 +259,12 @@ export default function RoomsPanel({ agents }) {
         })}
       </ul>
 
-      {agentList.length === 0 && (
+      {agentList.length === 0 && agentError && (
+        <output className="court-error" role="alert">
+          Court roster unavailable: {agentError}
+        </output>
+      )}
+      {agentList.length === 0 && !agentError && (
         <p className="court-empty">No agents found. The Court stands empty.</p>
       )}
 
